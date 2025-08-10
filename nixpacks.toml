@@ -1,0 +1,12 @@
+[phases.build]
+cmds = [
+  "go build -o main ."
+]
+
+[phases.start]
+cmd = "./main"
+
+[variables]
+GOPROXY = "https://proxy.golang.org,direct"
+GOSUMDB = "sum.golang.org"
+CGO_ENABLED = "0"

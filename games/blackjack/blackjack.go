@@ -2,11 +2,12 @@ package blackjack
 
 import (
 	"fmt"
-	"hrc-go/utils"
 	"log"
 	"strconv"
 	"sync"
 	"time"
+
+	"hrc-go/utils"
 
 	"github.com/bwmarrin/discordgo"
 )
