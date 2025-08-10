@@ -1,12 +1,16 @@
+[phases.setup]
+cmds = ["echo 'Setting up Go environment'"]
+
 [phases.build]
 cmds = [
-  "go build -o main ."
+  "go version",
+  "go mod tidy",
+  "go build -v -o out ."
 ]
 
 [phases.start]
-cmd = "./main"
+cmd = "./out"
 
 [variables]
-GOPROXY = "https://proxy.golang.org,direct"
-GOSUMDB = "sum.golang.org"
 CGO_ENABLED = "0"
+GOOS = "linux"
