@@ -5,8 +5,10 @@ import (
 	"hrc-go/games/blackjack"
 	"hrc-go/utils"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -55,6 +57,9 @@ func main() {
 	// Add event handlers
 	session.AddHandler(onReady)
 	session.AddHandler(onInteractionCreate)
+
+	// Start HTTP server for health checks (Railway requirement)
+	go startHealthServer()
 
 	// Register slash commands
 	if err := registerCommands(); err != nil {
@@ -368,11 +373,9 @@ func respondWithError(s *discordgo.Session, i *discordgo.InteractionCreate, mess
 	}
 }
 
-// Helper functions (these need proper implementation)
+// Helper functions
 func parseUserID(discordID string) (int64, error) {
-	// TODO: Implement proper Discord ID to int64 conversion
-	// For now, return a placeholder
-	return 12345, nil
+	return strconv.ParseInt(discordID, 10, 64)
 }
 
 func canClaimDaily(user *utils.User) bool {
@@ -398,4 +401,28 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", hours, minutes)
 	}
 	return fmt.Sprintf("%dm", minutes)
+}
+
+// startHealthServer starts a simple HTTP server for Railway health checks
+func startHealthServer() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("High Rollers Casino Bot - Online"))
+	})
+
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"healthy","service":"discord-bot"}`))
+	})
+
+	log.Printf("Health server starting on port %s", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Printf("Health server error: %v", err)
+	}
 }

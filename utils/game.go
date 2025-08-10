@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strconv"
 	"sync"
 	"time"
 
@@ -240,9 +241,7 @@ func (bg *BaseGame) UpdateOriginalResponse(embed *discordgo.MessageEmbed, compon
 
 // Helper function to parse user ID from string to int64
 func parseUserID(userIDStr string) (int64, error) {
-	// In a real implementation, you'd parse the Discord user ID string to int64
-	// For now, return a placeholder
-	return 12345, nil // TODO: Implement proper user ID parsing
+	return strconv.ParseInt(userIDStr, 10, 64)
 }
 
 // GameManager manages active games

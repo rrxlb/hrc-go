@@ -2,7 +2,6 @@ package models
 
 import (
 	"time"
-	"hrc-go/utils"
 )
 
 // User represents a Discord user in the casino bot system
@@ -15,7 +14,7 @@ type User struct {
 	TotalXP       int64           `json:"total_xp"`
 	CurrentXP     int64           `json:"current_xp"`
 	PrestigeLevel int             `json:"prestige_level"`
-	PremiumData   utils.JSONB     `json:"premium_data"`
+	PremiumData   map[string]interface{} `json:"premium_data"`
 	LastDaily     *time.Time      `json:"last_daily"`
 	CreatedAt     time.Time       `json:"created_at"`
 	UpdatedAt     time.Time       `json:"updated_at"`
@@ -33,12 +32,31 @@ type UserUpdateData struct {
 	LastDaily          *time.Time `json:"last_daily,omitempty"`
 }
 
+// Rank represents a user rank
+type Rank struct {
+	Name       string
+	Icon       string
+	XPRequired int
+	Color      int
+}
+
 // GetRank returns the user's current rank based on total XP
-func (u *User) GetRank() utils.Rank {
-	currentRank := utils.Ranks[0] // Default to first rank
+func (u *User) GetRank() Rank {
+	ranks := map[int]Rank{
+		0: {"Novice", "🥉", 0, 0xcd7f32},
+		1: {"Apprentice", "🥈", 10000, 0xc0c0c0},
+		2: {"Gambler", "🥇", 40000, 0xffd700},
+		3: {"High Roller", "💰", 125000, 0x22a7f0},
+		4: {"Card Shark", "🦈", 350000, 0x1f3a93},
+		5: {"Pit Boss", "👑", 650000, 0x9b59b6},
+		6: {"Legend", "🌟", 2000000, 0xf1c40f},
+		7: {"Casino Elite", "💎", 4500000, 0x1abc9c},
+	}
 	
-	for level := len(utils.Ranks) - 1; level >= 0; level-- {
-		rank, exists := utils.Ranks[level]
+	currentRank := ranks[0] // Default to first rank
+	
+	for level := len(ranks) - 1; level >= 0; level-- {
+		rank, exists := ranks[level]
 		if exists && u.TotalXP >= int64(rank.XPRequired) {
 			return rank
 		}
@@ -49,8 +67,19 @@ func (u *User) GetRank() utils.Rank {
 
 // GetRankLevel returns the numerical rank level (0-7)
 func (u *User) GetRankLevel() int {
-	for level := len(utils.Ranks) - 1; level >= 0; level-- {
-		rank, exists := utils.Ranks[level]
+	ranks := map[int]Rank{
+		0: {"Novice", "🥉", 0, 0xcd7f32},
+		1: {"Apprentice", "🥈", 10000, 0xc0c0c0},
+		2: {"Gambler", "🥇", 40000, 0xffd700},
+		3: {"High Roller", "💰", 125000, 0x22a7f0},
+		4: {"Card Shark", "🦈", 350000, 0x1f3a93},
+		5: {"Pit Boss", "👑", 650000, 0x9b59b6},
+		6: {"Legend", "🌟", 2000000, 0xf1c40f},
+		7: {"Casino Elite", "💎", 4500000, 0x1abc9c},
+	}
+	
+	for level := len(ranks) - 1; level >= 0; level-- {
+		rank, exists := ranks[level]
 		if exists && u.TotalXP >= int64(rank.XPRequired) {
 			return level
 		}
@@ -59,11 +88,22 @@ func (u *User) GetRankLevel() int {
 }
 
 // GetNextRank returns the next rank the user can achieve, or nil if at max rank
-func (u *User) GetNextRank() *utils.Rank {
+func (u *User) GetNextRank() *Rank {
+	ranks := map[int]Rank{
+		0: {"Novice", "🥉", 0, 0xcd7f32},
+		1: {"Apprentice", "🥈", 10000, 0xc0c0c0},
+		2: {"Gambler", "🥇", 40000, 0xffd700},
+		3: {"High Roller", "💰", 125000, 0x22a7f0},
+		4: {"Card Shark", "🦈", 350000, 0x1f3a93},
+		5: {"Pit Boss", "👑", 650000, 0x9b59b6},
+		6: {"Legend", "🌟", 2000000, 0xf1c40f},
+		7: {"Casino Elite", "💎", 4500000, 0x1abc9c},
+	}
+	
 	currentLevel := u.GetRankLevel()
 	nextLevel := currentLevel + 1
 	
-	if nextRank, exists := utils.Ranks[nextLevel]; exists {
+	if nextRank, exists := ranks[nextLevel]; exists {
 		return &nextRank
 	}
 	
@@ -112,7 +152,8 @@ func (u *User) CanAffordBet(amount int64) bool {
 
 // NetProfit calculates the user's lifetime net profit/loss
 func (u *User) NetProfit() int64 {
-	return u.Chips - utils.StartingChips
+	const StartingChips = 1000
+	return u.Chips - StartingChips
 }
 
 // IsNewUser checks if this is a new user (less than 24 hours old)

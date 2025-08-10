@@ -207,6 +207,14 @@ func GameResultEmbed(gameType string, bet, profit int64, userBefore, userAfter *
 	return embed
 }
 
+// Rank represents a user rank for embeds
+type Rank struct {
+	Name       string
+	Icon       string
+	XPRequired int
+	Color      int
+}
+
 // UserProfileEmbed creates an embed for user profile display
 func UserProfileEmbed(user *User, discordUser *discordgo.User) *discordgo.MessageEmbed {
 	rank := getUserRank(user.TotalXP)
@@ -332,19 +340,41 @@ func abs(n int64) int64 {
 }
 
 func getUserRank(totalXP int64) Rank {
-	for level := len(Ranks) - 1; level >= 0; level-- {
-		rank, exists := Ranks[level]
+	ranks := map[int]Rank{
+		0: {"Novice", "🥉", 0, 0xcd7f32},
+		1: {"Apprentice", "🥈", 10000, 0xc0c0c0},
+		2: {"Gambler", "🥇", 40000, 0xffd700},
+		3: {"High Roller", "💰", 125000, 0x22a7f0},
+		4: {"Card Shark", "🦈", 350000, 0x1f3a93},
+		5: {"Pit Boss", "👑", 650000, 0x9b59b6},
+		6: {"Legend", "🌟", 2000000, 0xf1c40f},
+		7: {"Casino Elite", "💎", 4500000, 0x1abc9c},
+	}
+	
+	for level := len(ranks) - 1; level >= 0; level-- {
+		rank, exists := ranks[level]
 		if exists && totalXP >= int64(rank.XPRequired) {
 			return rank
 		}
 	}
-	return Ranks[0]
+	return ranks[0]
 }
 
 func getNextRank(totalXP int64) *Rank {
+	ranks := map[int]Rank{
+		0: {"Novice", "🥉", 0, 0xcd7f32},
+		1: {"Apprentice", "🥈", 10000, 0xc0c0c0},
+		2: {"Gambler", "🥇", 40000, 0xffd700},
+		3: {"High Roller", "💰", 125000, 0x22a7f0},
+		4: {"Card Shark", "🦈", 350000, 0x1f3a93},
+		5: {"Pit Boss", "👑", 650000, 0x9b59b6},
+		6: {"Legend", "🌟", 2000000, 0xf1c40f},
+		7: {"Casino Elite", "💎", 4500000, 0x1abc9c},
+	}
+	
 	currentLevel := -1
-	for level := len(Ranks) - 1; level >= 0; level-- {
-		rank, exists := Ranks[level]
+	for level := len(ranks) - 1; level >= 0; level-- {
+		rank, exists := ranks[level]
 		if exists && totalXP >= int64(rank.XPRequired) {
 			currentLevel = level
 			break
@@ -352,7 +382,7 @@ func getNextRank(totalXP int64) *Rank {
 	}
 	
 	nextLevel := currentLevel + 1
-	if nextRank, exists := Ranks[nextLevel]; exists {
+	if nextRank, exists := ranks[nextLevel]; exists {
 		return &nextRank
 	}
 	
