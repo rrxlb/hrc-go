@@ -269,8 +269,8 @@ func handleReveal(s *discordgo.Session, i *discordgo.InteractionCreate, g *Game,
 			newBal = userAfter.Chips
 		}
 
-		// Disable all buttons
-		comps := disableAllComponents(buildComponents(g))
+		// Hide grid/components in final state to reduce space
+		comps := []discordgo.MessageComponent{}
 		// Build final embed
 		embed := createMinesEmbed(g, "final", reason, profit, xp, newBal)
 		_ = utils.UpdateComponentInteraction(s, i, embed, comps)
@@ -331,7 +331,7 @@ func buildComponents(g *Game) []discordgo.MessageComponent {
 			if t.IsRevealed {
 				disabled = true
 				if t.IsMine {
-					label = "💣"
+					label = "💥"
 				} else {
 					label = "💎"
 				}
@@ -392,7 +392,7 @@ func createMinesEmbed(g *Game, state, outcome string, profit, xp int64, newBalan
 	// Game info
 	embed.Fields = []*discordgo.MessageEmbedField{
 		{Name: "Initial Bet", Value: fmt.Sprintf("%s %s", utils.FormatChips(g.Bet), utils.ChipsEmoji), Inline: true},
-		{Name: "Mines", Value: fmt.Sprintf("%d 💣", g.MineCount), Inline: true},
+		{Name: "Mines", Value: fmt.Sprintf("%d 💥", g.MineCount), Inline: true},
 	}
 
 	if state == "playing" {
