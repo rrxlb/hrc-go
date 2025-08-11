@@ -445,7 +445,7 @@ func (bg *BlackjackGame) createGameEmbed(gameOver bool) *discordgo.MessageEmbed 
 		if len(bg.DealerHand.Cards) > 0 {
 			dealerHand = append(dealerHand, bg.DealerHand.Cards[0].String())
 			dealerHand = append(dealerHand, "??")
-			dealerValue = bg.DealerHand.Cards[0].GetValue(\"blackjack\")
+			dealerValue = bg.DealerHand.Cards[0].GetValue("blackjack")
 		}
 	}
 	
