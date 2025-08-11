@@ -348,81 +348,59 @@ func (bg *BlackjackGame) updateGameState() error {
 
 // createGameEmbed creates the Discord embed for the game state
 func (bg *BlackjackGame) createGameEmbed(gameOver bool) *discordgo.MessageEmbed {
-	// Convert hands to card slices for the embed function
-	var playerHands [][]utils.Card
-	var playerScores []int
-	
-	for _, hand := range bg.PlayerHands {
-		playerHands = append(playerHands, hand.Cards)
-		playerScores = append(playerScores, hand.GetValue())
+	// Build HandData slice
+	var playerHandData []utils.HandData
+	hasAces := false
+	for idx, hand := range bg.PlayerHands {
+		cards := make([]string, len(hand.Cards))
+		for i, c := range hand.Cards { cards[i] = c.String(); if c.IsAce() { hasAces = true } }
+		playerHandData = append(playerHandData, utils.HandData{Hand: cards, Score: hand.GetValue(), IsActive: idx == bg.CurrentHand && !gameOver})
 	}
-	
-	embed := utils.BlackjackGameEmbed(
-		playerHands,
-		bg.DealerHand.Cards,
-		playerScores,
-		bg.DealerHand.GetValue(),
-		bg.CurrentHand,
-		gameOver,
-	)
-	
-	// Add bet information
-	totalBet := int64(0)
-	for _, bet := range bg.Bets {
-		totalBet += bet
-	}
-	
-	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-		Name:   "💰 Total Bet",
-		Value:  fmt.Sprintf("%s %s", utils.FormatChips(totalBet), utils.ChipsEmoji),
-		Inline: true,
-	})
-	
-	// Add results if game is over
-	if gameOver && len(bg.Results) > 0 {
-		resultText := ""
-		totalPayout := int64(0)
-		
-		for _, result := range bg.Results {
-			payout := int64(float64(bg.Bets[result.HandIndex]) * result.Payout)
-			totalPayout += payout
-			
-			if len(bg.Results) > 1 {
-				resultText += fmt.Sprintf("Hand %d: %s (%s %s)\n",
-					result.HandIndex+1,
-					result.Result,
-					utils.FormatChips(payout),
-					utils.ChipsEmoji,
-				)
-			} else {
-				resultText = fmt.Sprintf("%s (%s %s)",
-					result.Result,
-					utils.FormatChips(payout),
-					utils.ChipsEmoji,
-				)
-			}
+
+	// Dealer hand (hide second card if not game over)
+	var dealerCards []string
+	dealerValue := 0
+	if gameOver {
+		for _, c := range bg.DealerHand.Cards { dealerCards = append(dealerCards, c.String()) }
+		dealerValue = bg.DealerHand.GetValue()
+	} else {
+		if len(bg.DealerHand.Cards) > 0 {
+			dealerCards = append(dealerCards, bg.DealerHand.Cards[0].String())
+			dealerCards = append(dealerCards, "??")
+			dealerValue = bg.DealerHand.Cards[0].GetValue("blackjack")
 		}
-		
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "🎯 Result",
-			Value:  resultText,
-			Inline: false,
-		})
-		
-		profit := totalPayout - totalBet
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "💵 Profit/Loss",
-			Value:  fmt.Sprintf("%s%s %s", getProfitPrefix(profit), utils.FormatChips(abs(profit)), utils.ChipsEmoji),
-			Inline: true,
-		})
-		
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "💳 New Balance",
-			Value:  fmt.Sprintf("%s %s", utils.FormatChips(bg.UserData.Chips), utils.ChipsEmoji),
-			Inline: true,
-		})
 	}
-	
+
+	totalBet := int64(0)
+	for _, b := range bg.Bets { totalBet += b }
+
+	// Outcome aggregation if game over
+	outcomeText := ""
+	profit := int64(0)
+	xpGain := int64(0)
+	if gameOver && len(bg.Results) > 0 {
+		var totalPayout int64
+		for _, r := range bg.Results {
+			payout := int64(float64(bg.Bets[r.HandIndex]) * r.Payout)
+			totalPayout += payout
+			if len(bg.Results) > 1 { outcomeText += fmt.Sprintf("Hand %d: %s (%s %s)\n", r.HandIndex+1, r.Result, utils.FormatChips(payout), utils.ChipsEmoji) } else { outcomeText = fmt.Sprintf("%s (%s %s)", r.Result, utils.FormatChips(payout), utils.ChipsEmoji) }
+		}
+		profit = totalPayout - totalBet
+	}
+
+	embed := utils.BlackjackGameEmbed(
+		playerHandData,
+		dealerCards,
+		dealerValue,
+		totalBet,
+		gameOver,
+		outcomeText,
+		bg.UserData.Chips,
+		profit,
+		xpGain,
+		hasAces,
+	)
+
 	return embed
 }
 
@@ -576,4 +554,20 @@ func respondWithError(s *discordgo.Session, i *discordgo.InteractionCreate, mess
 	)
 	
 	utils.SendInteractionResponse(s, i, embed, nil, true)
+}
+
+// RegisterBlackjackCommands returns the slash command definition for blackjack
+func RegisterBlackjackCommands() *discordgo.ApplicationCommand {
+	return &discordgo.ApplicationCommand{
+		Name:        "blackjack",
+		Description: "Start a game of Blackjack",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "bet",
+				Description: "Chips to wager (e.g. 500, 10k, 50%)",
+				Required:    true,
+			},
+		},
+	}
 }

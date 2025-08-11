@@ -6,8 +6,6 @@ import (
 	"log"
 	"sync"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // AchievementCategory represents different categories of achievements

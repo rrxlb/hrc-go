@@ -21,48 +21,48 @@ const (
 
 // BonusInfo contains information about a bonus
 type BonusInfo struct {
-	Type          BonusType `json:"type"`
-	BaseAmount    int64     `json:"base_amount"`
-	ActualAmount  int64     `json:"actual_amount"`
-	XPAmount      int64     `json:"xp_amount"`
+	Type          BonusType     `json:"type"`
+	BaseAmount    int64         `json:"base_amount"`
+	ActualAmount  int64         `json:"actual_amount"`
+	XPAmount      int64         `json:"xp_amount"`
 	Cooldown      time.Duration `json:"cooldown"`
-	NextAvailable time.Time `json:"next_available"`
-	Multiplier    float64   `json:"multiplier"`
-	StreakBonus   int64     `json:"streak_bonus"`
+	NextAvailable time.Time     `json:"next_available"`
+	Multiplier    float64       `json:"multiplier"`
+	StreakBonus   int64         `json:"streak_bonus"`
 }
 
 // BonusResult represents the result of claiming a bonus
 type BonusResult struct {
-	Success       bool      `json:"success"`
-	BonusInfo     *BonusInfo `json:"bonus_info,omitempty"`
-	Error         string    `json:"error,omitempty"`
+	Success       bool          `json:"success"`
+	BonusInfo     *BonusInfo    `json:"bonus_info,omitempty"`
+	Error         string        `json:"error,omitempty"`
 	TimeRemaining time.Duration `json:"time_remaining"`
 }
 
 // Bonus configuration constants
 const (
 	// Base bonus amounts
-	BaseHourlyBonus  = 100   // 100 chips per hour
-	BaseDailyBonus   = 500   // 500 chips per day
-	BaseWeeklyBonus  = 2500  // 2500 chips per week
-	BaseVoteBonus    = 1000  // 1000 chips per vote
+	BaseHourlyBonus = 100  // 100 chips per hour
+	BaseDailyBonus  = 500  // 500 chips per day
+	BaseWeeklyBonus = 2500 // 2500 chips per week
+	BaseVoteBonus   = 1000 // 1000 chips per vote
 
 	// XP rewards
-	HourlyXP  = 50   // 50 XP per hourly
-	DailyXP   = 250  // 250 XP per daily
-	WeeklyXP  = 1000 // 1000 XP per weekly
-	VoteXP    = 500  // 500 XP per vote
+	HourlyXP = 50   // 50 XP per hourly
+	DailyXP  = 250  // 250 XP per daily
+	WeeklyXP = 1000 // 1000 XP per weekly
+	VoteXP   = 500  // 500 XP per vote
 
 	// Cooldown periods
-	HourlyCooldown = time.Hour        // 1 hour
-	DailyCooldown  = 24 * time.Hour   // 24 hours
+	HourlyCooldown = time.Hour          // 1 hour
+	DailyCooldown  = 24 * time.Hour     // 24 hours
 	WeeklyCooldown = 7 * 24 * time.Hour // 7 days
-	VoteCooldown   = 12 * time.Hour   // 12 hours (top.gg voting cooldown)
+	VoteCooldown   = 12 * time.Hour     // 12 hours (top.gg voting cooldown)
 
 	// Bonus multipliers
-	MaxRankMultiplier     = 1.5  // 50% bonus for max rank
-	PrestigeMultiplier    = 0.1  // 10% per prestige level
-	MaxPrestigeMultiplier = 2.0  // 200% max bonus from prestige
+	MaxRankMultiplier     = 1.5 // 50% bonus for max rank
+	PrestigeMultiplier    = 0.1 // 10% per prestige level
+	MaxPrestigeMultiplier = 2.0 // 200% max bonus from prestige
 )
 
 // BonusManager handles all bonus-related operations
@@ -121,7 +121,7 @@ func (bm *BonusManager) ClaimBonus(user *User, bonusType BonusType) (*BonusResul
 
 	// Calculate bonus amounts
 	bonusInfo := bm.calculateBonusAmount(user, bonusType)
-	
+
 	// Update user data
 	now := time.Now()
 	updates := UserUpdateData{
@@ -144,7 +144,7 @@ func (bm *BonusManager) ClaimBonus(user *User, bonusType BonusType) (*BonusResul
 	}
 
 	// Apply updates to database and cache
-	updatedUser, err := UpdateCachedUser(user.UserID, updates)
+	_, err := UpdateCachedUser(user.UserID, updates)
 	if err != nil {
 		return &BonusResult{
 			Success: false,
@@ -152,7 +152,7 @@ func (bm *BonusManager) ClaimBonus(user *User, bonusType BonusType) (*BonusResul
 		}, err
 	}
 
-	log.Printf("User %d claimed %s bonus: %d chips, %d XP", 
+	log.Printf("User %d claimed %s bonus: %d chips, %d XP",
 		user.UserID, bonusType, bonusInfo.ActualAmount, bonusInfo.XPAmount)
 
 	// Return success result
@@ -204,7 +204,7 @@ func (bm *BonusManager) calculateBonusAmount(user *User, bonusType BonusType) *B
 	// Prestige-based multiplier
 	if user.Prestige > 0 {
 		prestigeBonus := float64(user.Prestige) * PrestigeMultiplier
-		if prestigeBonus > MaxPrestigeMultiplier - 1.0 {
+		if prestigeBonus > MaxPrestigeMultiplier-1.0 {
 			prestigeBonus = MaxPrestigeMultiplier - 1.0
 		}
 		multiplier += prestigeBonus
@@ -212,7 +212,7 @@ func (bm *BonusManager) calculateBonusAmount(user *User, bonusType BonusType) *B
 
 	// Apply multiplier
 	actualAmount := int64(float64(baseAmount) * multiplier)
-	
+
 	// Calculate streak bonus for daily bonuses
 	var streakBonus int64
 	if bonusType == BonusDaily {
@@ -236,7 +236,7 @@ func (bm *BonusManager) calculateDailyStreakBonus(user *User) int64 {
 	// This is a simplified streak calculation
 	// In a full implementation, you'd track daily streak in the database
 	dailyCount := user.DailyBonusesClaimed
-	
+
 	// Every 7 days gives a streak bonus
 	streakWeeks := dailyCount / 7
 	return int64(streakWeeks) * 100 // 100 chips per week of daily bonuses
@@ -245,9 +245,9 @@ func (bm *BonusManager) calculateDailyStreakBonus(user *User) int64 {
 // GetAllCooldowns returns cooldown information for all bonus types
 func (bm *BonusManager) GetAllCooldowns(user *User) map[BonusType]*BonusResult {
 	cooldowns := make(map[BonusType]*BonusResult)
-	
+
 	bonusTypes := []BonusType{BonusHourly, BonusDaily, BonusWeekly, BonusVote}
-	
+
 	for _, bonusType := range bonusTypes {
 		result := bm.CanClaimBonus(user, bonusType)
 		if result.Success {
@@ -257,7 +257,7 @@ func (bm *BonusManager) GetAllCooldowns(user *User) map[BonusType]*BonusResult {
 		}
 		cooldowns[bonusType] = result
 	}
-	
+
 	return cooldowns
 }
 
@@ -319,7 +319,7 @@ func (bm *BonusManager) ClaimAllAvailableBonuses(user *User) ([]*BonusResult, er
 		return nil, fmt.Errorf("failed to update user data: %w", err)
 	}
 
-	log.Printf("User %d claimed %d bonuses: %d chips, %d XP total", 
+	log.Printf("User %d claimed %d bonuses: %d chips, %d XP total",
 		user.UserID, len(claimedBonuses), totalChips, totalXP)
 
 	return claimedBonuses, nil
@@ -351,7 +351,7 @@ func (bm *BonusManager) CreateBonusEmbed(user *User, bonusResult *BonusResult, t
 				Inline: true,
 			},
 			{
-				Name:   "⭐ XP Earned", 
+				Name:   "⭐ XP Earned",
 				Value:  fmt.Sprintf("%d XP", bonusInfo.XPAmount),
 				Inline: true,
 			},
@@ -392,7 +392,7 @@ func (bm *BonusManager) CreateBonusEmbed(user *User, bonusResult *BonusResult, t
 // CreateCooldownEmbed creates a Discord embed showing all cooldowns
 func (bm *BonusManager) CreateCooldownEmbed(user *User) *discordgo.MessageEmbed {
 	cooldowns := bm.GetAllCooldowns(user)
-	
+
 	embed := &discordgo.MessageEmbed{
 		Title:       "🕒 Bonus Cooldowns",
 		Description: fmt.Sprintf("Bonus status for %s", user.UserID),
@@ -416,14 +416,14 @@ func (bm *BonusManager) CreateCooldownEmbed(user *User) *discordgo.MessageEmbed 
 
 		if result.Success {
 			// Bonus is available
-			value = fmt.Sprintf("✅ Ready! (%d %s)", 
+			value = fmt.Sprintf("✅ Ready! (%d %s)",
 				result.BonusInfo.ActualAmount, ChipsEmoji)
 		} else {
 			// Show time remaining
 			if result.TimeRemaining > 0 {
 				hours := int(result.TimeRemaining.Hours())
 				minutes := int(result.TimeRemaining.Minutes()) % 60
-				
+
 				if hours > 24 {
 					days := hours / 24
 					hours = hours % 24

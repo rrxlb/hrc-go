@@ -305,7 +305,7 @@ func (jm *JackpotManager) TryWinJackpot(jackpotType JackpotType, userID int64, b
 
 	// Simulate random chance (in production, you'd use proper RNG)
 	// For now, use simple probability check
-	winThreshold := adjustedProbability * 1000000 // Scale to integer for comparison
+	// adjustedProbability * 1000000 would be threshold if using integer RNG; kept implicit
 	
 	// Simplified win condition - in production you'd use crypto/rand
 	timestamp := time.Now().UnixNano()

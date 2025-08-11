@@ -1,3 +1,10 @@
+//go:build ignore
+
+// This legacy game_interface.go file is excluded from the build to avoid
+// duplicate type declarations with game.go. It is kept temporarily during
+// the migration from the Python codebase for reference. Once the migration
+// is complete, remove this file entirely.
+package utils
 package utils
 
 import (

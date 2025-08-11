@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"hrc-go/cogs"
+	blackjack "hrc-go/games/blackjack"
 	"hrc-go/utils"
 
 	"github.com/bwmarrin/discordgo"
@@ -55,10 +55,7 @@ func main() {
 		log.Println("Jackpot system initialized")
 	}
 
-	// Initialize game manager
-	utils.InitializeGameManager()
-	defer utils.CloseGameManager()
-	log.Println("Game manager initialized")
+	// (Game manager initialization removed; legacy interface cleanup)
 
 	// Get bot token from environment
 	token := os.Getenv("BOT_TOKEN")
@@ -167,7 +164,7 @@ func registerSlashCommands(s *discordgo.Session) error {
 			Name:        "claimall",
 			Description: "Claim all available bonuses",
 		},
-		cogs.RegisterBlackjackCommands(),
+		blackjack.RegisterBlackjackCommands(),
 	}
 
 	for _, command := range commands {
@@ -206,7 +203,7 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	case "claimall":
 		handleClaimAllCommand(s, i)
 	case "blackjack":
-		cogs.HandleBlackjackCommand(s, i)
+		blackjack.HandleBlackjackCommand(s, i)
 	}
 }
 
@@ -219,7 +216,7 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	
 	// Route button interactions to appropriate handlers
 	if strings.HasPrefix(customID, "blackjack_") {
-		cogs.HandleBlackjackInteraction(s, i)
+		blackjack.HandleBlackjackInteraction(s, i)
 	}
 }
 
