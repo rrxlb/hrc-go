@@ -576,8 +576,19 @@ func ThreeCardPokerEmbed(state string, playerHand []string, dealerHand []string,
 		// Outcome field
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: outcome, Inline: false})
 		// Profit & Balance fields
-		profitVal := fmt.Sprintf("%s%s %s", getProfitPrefix(profit), FormatChips(abs(profit)), ChipsEmoji)
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Profit", Value: profitVal, Inline: true})
+		var profitFieldName string
+		var profitVal string
+		if profit > 0 {
+			profitFieldName = "Profit"
+			profitVal = fmt.Sprintf("+%s %s", FormatChips(profit), ChipsEmoji)
+		} else if profit < 0 {
+			profitFieldName = "Loss"
+			profitVal = fmt.Sprintf("%s %s", FormatChips(abs(profit)), ChipsEmoji)
+		} else { // push
+			profitFieldName = "Result"
+			profitVal = "Push"
+		}
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: profitFieldName, Value: profitVal, Inline: true})
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", FormatChips(finalBalance), ChipsEmoji), Inline: true})
 		if len(payoutLines) > 0 {
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Payouts", Value: strings.Join(payoutLines, "\n"), Inline: false})
