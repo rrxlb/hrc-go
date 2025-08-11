@@ -548,13 +548,16 @@ func ThreeCardPokerEmbed(state string, playerHand []string, dealerHand []string,
 	}
 	embed := CreateBrandedEmbed(title, description, color)
 	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1754083114/TC2_ugnpqd.png"}
-	// Card fields (side-by-side)
-	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Your Hand", Value: fmt.Sprintf("`%s`\n%s", strings.Join(playerHand, " "), playerEval), Inline: true})
+	// Card fields (side-by-side) with greyed evaluator using block quote style (> )
+	playerVal := fmt.Sprintf("`%s`\n> %s", strings.Join(playerHand, " "), playerEval)
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Your Hand", Value: playerVal, Inline: true})
 	if state == "initial" {
 		masked := "?? ?? ??"
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Dealer's Hand", Value: fmt.Sprintf("`%s`\n%s", masked, "??"), Inline: true})
+		dealerVal := fmt.Sprintf("`%s`\n> %s", masked, "??")
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Dealer's Hand", Value: dealerVal, Inline: true})
 	} else {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Dealer's Hand", Value: fmt.Sprintf("`%s`\n%s", strings.Join(dealerHand, " "), dealerEval), Inline: true})
+		dealerVal := fmt.Sprintf("`%s`\n> %s", strings.Join(dealerHand, " "), dealerEval)
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Dealer's Hand", Value: dealerVal, Inline: true})
 	}
 
 	// Bets only shown during initial decision phase
