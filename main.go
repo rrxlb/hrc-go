@@ -19,6 +19,7 @@ import (
 
 var session *discordgo.Session
 var botStatus = "starting"
+var readyCh = make(chan struct{}, 1)
 
 func main() {
 	// Start HTTP server for Railway health checks
@@ -75,8 +76,12 @@ func main() {
 		select {}
 	}
 
-	// Set up basic intents
-	session.Identify.Intents = discordgo.IntentsGuildMessages
+	// Set up intents (broader to ensure interactions / ready received)
+	session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildMessageReactions
+	// Optional: uncomment if you later need message content
+	// session.Identify.Intents |= discordgo.IntentMessageContent
+
+	log.Println("Discord session created, opening gateway connection...")
 
 	// Add event handlers
 	session.AddHandler(onReady)
@@ -88,6 +93,15 @@ func main() {
 		log.Printf("Failed to open Discord connection: %v", err)
 		botStatus = "connection_failed"
 		select {}
+	}
+	log.Println("Gateway connection attempt initiated, waiting for READY event...")
+
+	// Wait for READY or timeout to help diagnose hanging
+	select {
+	case <-readyCh:
+		log.Println("Received READY event from Discord.")
+	case <-time.After(30 * time.Second):
+		log.Println("WARNING: Did not receive READY within 30s. Check token, intents, or gateway status.")
 	}
 	defer session.Close()
 
@@ -106,6 +120,10 @@ func main() {
 func onReady(s *discordgo.Session, event *discordgo.Ready) {
 	log.Printf("✅ Discord Bot logged in as %s (ID: %s)", event.User.Username, event.User.ID)
 	botStatus = "online"
+	select { // non-blocking send in case already signaled
+	case readyCh <- struct{}{}:
+	default:
+	}
 
 	// Set bot presence
 	if err := s.UpdateStatusComplex(discordgo.UpdateStatusData{

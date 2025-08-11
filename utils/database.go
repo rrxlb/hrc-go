@@ -17,39 +17,39 @@ import (
 )
 
 type User struct {
-	UserID               int64
-	Chips                int64
-	TotalXP              int64
-	CurrentXP            int64
-	Prestige             int
-	Wins                 int
-	Losses               int
-	DailyBonusesClaimed  int
-	VotesCount           int
-	LastHourly           *time.Time
-	LastDaily            *time.Time
-	LastWeekly           *time.Time
-	LastVote             *time.Time
-	LastBonus            *time.Time
-	PremiumSettings      JSONB
-	CreatedAt            time.Time
+	UserID              int64
+	Chips               int64
+	TotalXP             int64
+	CurrentXP           int64
+	Prestige            int
+	Wins                int
+	Losses              int
+	DailyBonusesClaimed int
+	VotesCount          int
+	LastHourly          *time.Time
+	LastDaily           *time.Time
+	LastWeekly          *time.Time
+	LastVote            *time.Time
+	LastBonus           *time.Time
+	PremiumSettings     JSONB
+	CreatedAt           time.Time
 }
 
 type UserUpdateData struct {
-	ChipsIncrement              int64
-	TotalXPIncrement            int64
-	CurrentXPIncrement          int64
-	WinsIncrement               int
-	LossesIncrement             int
+	ChipsIncrement               int64
+	TotalXPIncrement             int64
+	CurrentXPIncrement           int64
+	WinsIncrement                int
+	LossesIncrement              int
 	DailyBonusesClaimedIncrement int
-	VotesCountIncrement         int
-	Prestige                    *int
-	LastHourly                  *time.Time
-	LastDaily                   *time.Time
-	LastWeekly                  *time.Time
-	LastVote                    *time.Time
-	LastBonus                   *time.Time
-	PremiumSettings             JSONB
+	VotesCountIncrement          int
+	Prestige                     *int
+	LastHourly                   *time.Time
+	LastDaily                    *time.Time
+	LastWeekly                   *time.Time
+	LastVote                     *time.Time
+	LastBonus                    *time.Time
+	PremiumSettings              JSONB
 }
 
 type Achievement struct {
@@ -90,7 +90,7 @@ func (j *JSONB) Scan(value interface{}) error {
 		*j = nil
 		return nil
 	}
-	
+
 	var bytes []byte
 	switch v := value.(type) {
 	case []byte:
@@ -100,12 +100,12 @@ func (j *JSONB) Scan(value interface{}) error {
 	default:
 		return fmt.Errorf("cannot scan %T into JSONB", value)
 	}
-	
+
 	if len(bytes) == 0 {
 		*j = make(JSONB)
 		return nil
 	}
-	
+
 	var data map[string]interface{}
 	if err := json.Unmarshal(bytes, &data); err != nil {
 		log.Printf("Error unmarshaling JSONB: %v, data: %s", err, string(bytes))
@@ -113,15 +113,15 @@ func (j *JSONB) Scan(value interface{}) error {
 		*j = make(JSONB)
 		return nil
 	}
-	
+
 	*j = JSONB(data)
 	return nil
 }
 
 var (
-	DB           *pgxpool.Pool
+	DB            *pgxpool.Pool
 	dbInitialized = false
-	dbMutex      sync.RWMutex
+	dbMutex       sync.RWMutex
 )
 
 // SetupDatabase initializes the database connection pool
@@ -162,12 +162,12 @@ func SetupDatabase() error {
 	if err := createUsersTable(); err != nil {
 		log.Printf("Warning: Failed to create users table: %v", err)
 	}
-	
+
 	// Create user_achievements table if it doesn't exist
 	if err := createUserAchievementsTable(); err != nil {
 		log.Printf("Warning: Failed to create user_achievements table: %v", err)
 	}
-	
+
 	return nil
 }
 
@@ -462,7 +462,7 @@ func UpdateUser(userID int64, updates UserUpdateData) (*User, error) {
 // ParseBet parses a bet string and validates it
 func ParseBet(betStr string, userChips int64) (int64, error) {
 	betStr = strings.TrimSpace(strings.ToLower(betStr))
-	
+
 	// Handle special cases
 	switch betStr {
 	case "all", "allin":
@@ -472,7 +472,7 @@ func ParseBet(betStr string, userChips int64) (int64, error) {
 	case "max":
 		return userChips, nil
 	}
-	
+
 	// Handle percentage
 	if strings.HasSuffix(betStr, "%") {
 		percentStr := strings.TrimSuffix(betStr, "%")
@@ -485,7 +485,7 @@ func ParseBet(betStr string, userChips int64) (int64, error) {
 		}
 		return int64(float64(userChips) * percent / 100), nil
 	}
-	
+
 	// Handle multiplier suffixes
 	multiplier := int64(1)
 	if strings.HasSuffix(betStr, "k") {
@@ -495,13 +495,13 @@ func ParseBet(betStr string, userChips int64) (int64, error) {
 		multiplier = 1000000
 		betStr = strings.TrimSuffix(betStr, "m")
 	}
-	
+
 	// Parse the number
 	bet, err := strconv.ParseInt(betStr, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid bet amount: %s", betStr)
 	}
-	
+
 	return bet * multiplier, nil
 }
 
@@ -522,7 +522,7 @@ func GetRank(totalXP int64) (string, string, int, int64) {
 		{"Legend", "🌟", 2000000, 0xf1c40f},
 		{"Casino Elite", "💎", 4500000, 0x1abc9c},
 	}
-	
+
 	for i := len(ranks) - 1; i >= 0; i-- {
 		if totalXP >= ranks[i].XPRequired {
 			var nextXP int64
@@ -534,7 +534,7 @@ func GetRank(totalXP int64) (string, string, int, int64) {
 			return ranks[i].Name, ranks[i].Icon, ranks[i].Color, nextXP
 		}
 	}
-	
+
 	return ranks[0].Name, ranks[0].Icon, ranks[0].Color, ranks[1].XPRequired
 }
 
@@ -546,10 +546,10 @@ func GetJackpot() (int64, error) {
 
 	ctx := context.Background()
 	var amount int64
-	
+
 	query := "SELECT amount FROM jackpots WHERE id = 1"
 	err := DB.QueryRow(ctx, query).Scan(&amount)
-	
+
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			// Initialize jackpot if doesn't exist
@@ -557,7 +557,7 @@ func GetJackpot() (int64, error) {
 		}
 		return 0, fmt.Errorf("failed to get jackpot: %w", err)
 	}
-	
+
 	return amount, nil
 }
 
@@ -568,18 +568,18 @@ func InitializeJackpot(amount int64) (int64, error) {
 	}
 
 	ctx := context.Background()
-	
+
 	query := `
 	INSERT INTO jackpots (id, amount) VALUES (1, $1)
 	ON CONFLICT (id) DO UPDATE SET amount = EXCLUDED.amount
 	RETURNING amount`
-	
+
 	var newAmount int64
 	err := DB.QueryRow(ctx, query, amount).Scan(&newAmount)
 	if err != nil {
 		return 0, fmt.Errorf("failed to initialize jackpot: %w", err)
 	}
-	
+
 	return newAmount, nil
 }
 
@@ -590,17 +590,17 @@ func UpdateJackpot(increment int64) (int64, error) {
 	}
 
 	ctx := context.Background()
-	
+
 	query := `
 	UPDATE jackpots SET amount = amount + $1 WHERE id = 1
 	RETURNING amount`
-	
+
 	var newAmount int64
 	err := DB.QueryRow(ctx, query, increment).Scan(&newAmount)
 	if err != nil {
 		return 0, fmt.Errorf("failed to update jackpot: %w", err)
 	}
-	
+
 	return newAmount, nil
 }
 
