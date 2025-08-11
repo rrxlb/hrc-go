@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -41,6 +42,7 @@ func main() {
 
 	// Add event handlers
 	session.AddHandler(onReady)
+	session.AddHandler(onInteractionCreate)
 
 	// Open Discord connection
 	if err := session.Open(); err != nil {
@@ -78,6 +80,120 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 	}); err != nil {
 		log.Printf("Failed to update status: %v", err)
 	}
+	
+	// Register slash commands
+	if err := registerSlashCommands(s); err != nil {
+		log.Printf("Failed to register slash commands: %v", err)
+	}
+}
+
+func registerSlashCommands(s *discordgo.Session) error {
+	commands := []*discordgo.ApplicationCommand{
+		{
+			Name:        "ping",
+			Description: "Check bot latency and status",
+		},
+		{
+			Name:        "info",
+			Description: "Get information about the bot",
+		},
+	}
+
+	for _, command := range commands {
+		_, err := s.ApplicationCommandCreate(s.State.User.ID, "", command)
+		if err != nil {
+			return fmt.Errorf("failed to create command %s: %w", command.Name, err)
+		}
+	}
+	
+	log.Printf("Successfully registered %d slash commands", len(commands))
+	return nil
+}
+
+func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.ApplicationCommandData().Name == "ping" {
+		handlePingCommand(s, i)
+	} else if i.ApplicationCommandData().Name == "info" {
+		handleInfoCommand(s, i)
+	}
+}
+
+func handlePingCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	startTime := time.Now()
+	
+	// Calculate approximate latency
+	latency := s.HeartbeatLatency()
+	
+	embed := &discordgo.MessageEmbed{
+		Title: "🏓 Pong!",
+		Color: 0x5865F2,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "Latency",
+				Value:  fmt.Sprintf("%dms", latency.Milliseconds()),
+				Inline: true,
+			},
+			{
+				Name:   "Status",
+				Value:  "✅ Online",
+				Inline: true,
+			},
+			{
+				Name:   "Response Time",
+				Value:  fmt.Sprintf("%dms", time.Since(startTime).Milliseconds()),
+				Inline: true,
+			},
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
+}
+
+func handleInfoCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	embed := &discordgo.MessageEmbed{
+		Title:       "🎰 High Rollers Club Bot",
+		Description: "A Discord casino bot built with Go",
+		Color:       0x5865F2,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "Version",
+				Value:  "2.0.0 (Go Rewrite)",
+				Inline: true,
+			},
+			{
+				Name:   "Language",
+				Value:  "Go",
+				Inline: true,
+			},
+			{
+				Name:   "Framework",
+				Value:  "DiscordGo",
+				Inline: true,
+			},
+			{
+				Name:   "Features",
+				Value:  "Coming Soon: Casino Games, User System, Achievements",
+				Inline: false,
+			},
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "High Rollers Club",
+		},
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
 }
 
 func startHealthServer() {
