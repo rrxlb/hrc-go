@@ -736,9 +736,16 @@ func HandleCrapsModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			}
 		}
 	}
+	original := amountStr
 	if amountStr == "" {
 		amountStr = "0"
 	}
+	// sanitize: remove commas, underscores, currency symbols/backticks
+	amountStr = strings.TrimSpace(amountStr)
+	amountStr = strings.ReplaceAll(amountStr, ",", "")
+	amountStr = strings.ReplaceAll(amountStr, "_", "")
+	amountStr = strings.Trim(amountStr, "`$")
+	utils.BotLogf("CRAPS_MODAL", "raw='%s' sanitized='%s'", original, amountStr)
 	// Parse amount using user chips
 	user, err := utils.GetCachedUser(userID)
 	if err != nil {
@@ -751,9 +758,11 @@ func HandleCrapsModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if err != nil {
 			msg = err.Error()
 		}
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", msg, 0xFF0000), nil, true)
+		utils.BotLogf("CRAPS_MODAL", "parse error raw='%s' sanitized='%s' err=%v", original, amountStr, err)
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", msg+" ("+original+")", 0xFF0000), nil, true)
 		return
 	}
+	utils.BotLogf("CRAPS_MODAL", "parsed amt=%d from raw='%s'", amt, original)
 	if err := game.addBet(betType, amt); err != nil {
 		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Craps", err.Error(), 0xFF0000), nil, true)
 		return
