@@ -205,6 +205,15 @@ func UpdateCachedUser(userID int64, updates UserUpdateData) (*User, error) {
 		Cache.Update(userID, user)
 	}
 	
+	// Check for new achievements if achievement manager is initialized
+	if AchievementMgr != nil {
+		if newAchievements, err := AchievementMgr.CheckUserAchievements(user); err != nil {
+			log.Printf("Failed to check achievements for user %d: %v", userID, err)
+		} else if len(newAchievements) > 0 {
+			log.Printf("User %d earned %d new achievements", userID, len(newAchievements))
+		}
+	}
+	
 	return user, nil
 }
 

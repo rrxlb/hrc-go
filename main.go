@@ -34,6 +34,32 @@ func main() {
 		defer utils.CloseDatabase()
 	}
 
+	// Initialize cache system (10 minute TTL)
+	utils.InitializeCache(10 * time.Minute)
+	defer utils.CloseCache()
+	log.Println("Cache system initialized")
+
+	// Initialize achievement system
+	if err := utils.InitializeAchievementManager(); err != nil {
+		log.Printf("Achievement manager initialization failed: %v", err)
+		log.Println("Bot will continue without achievement features")
+	} else {
+		log.Println("Achievement system initialized")
+	}
+
+	// Initialize jackpot system
+	if err := utils.InitializeJackpotManager(); err != nil {
+		log.Printf("Jackpot manager initialization failed: %v", err)
+		log.Println("Bot will continue without jackpot features")
+	} else {
+		log.Println("Jackpot system initialized")
+	}
+
+	// Initialize game manager
+	utils.InitializeGameManager()
+	defer utils.CloseGameManager()
+	log.Println("Game manager initialized")
+
 	// Get bot token from environment
 	token := os.Getenv("BOT_TOKEN")
 	if token == "" {
@@ -121,6 +147,26 @@ func registerSlashCommands(s *discordgo.Session) error {
 			Name:        "balance",
 			Description: "Check your current chip balance",
 		},
+		{
+			Name:        "hourly",
+			Description: "Claim your hourly bonus",
+		},
+		{
+			Name:        "daily",
+			Description: "Claim your daily bonus",
+		},
+		{
+			Name:        "weekly",
+			Description: "Claim your weekly bonus",
+		},
+		{
+			Name:        "cooldowns",
+			Description: "Check your bonus cooldowns",
+		},
+		{
+			Name:        "claimall",
+			Description: "Claim all available bonuses",
+		},
 		cogs.RegisterBlackjackCommands(),
 	}
 
@@ -149,6 +195,16 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		handleProfileCommand(s, i)
 	case "balance":
 		handleBalanceCommand(s, i)
+	case "hourly":
+		handleBonusCommand(s, i, utils.BonusHourly)
+	case "daily":
+		handleBonusCommand(s, i, utils.BonusDaily)
+	case "weekly":
+		handleBonusCommand(s, i, utils.BonusWeekly)
+	case "cooldowns":
+		handleCooldownsCommand(s, i)
+	case "claimall":
+		handleClaimAllCommand(s, i)
 	case "blackjack":
 		cogs.HandleBlackjackCommand(s, i)
 	}
@@ -394,4 +450,148 @@ func startHealthServer() {
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Printf("Health server error: %v", err)
 	}
+}
+
+func handleBonusCommand(s *discordgo.Session, i *discordgo.InteractionCreate, bonusType utils.BonusType) {
+	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
+	
+	// Get or create user
+	user, err := utils.GetCachedUser(userID)
+	if err != nil {
+		respondWithError(s, i, "❌ Error accessing user data. Database may be unavailable.")
+		return
+	}
+
+	// Attempt to claim bonus
+	result, err := utils.BonusMgr.ClaimBonus(user, bonusType)
+	if err != nil {
+		respondWithError(s, i, "❌ An error occurred while claiming bonus.")
+		return
+	}
+
+	// Create and send embed
+	title := fmt.Sprintf("%s Bonus", string(bonusType))
+	embed := utils.BonusMgr.CreateBonusEmbed(user, result, title)
+	
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
+}
+
+func handleCooldownsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
+	
+	// Get or create user
+	user, err := utils.GetCachedUser(userID)
+	if err != nil {
+		respondWithError(s, i, "❌ Error accessing user data. Database may be unavailable.")
+		return
+	}
+
+	// Create cooldown embed
+	embed := utils.BonusMgr.CreateCooldownEmbed(user)
+	
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
+}
+
+func handleClaimAllCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
+	
+	// Get or create user
+	user, err := utils.GetCachedUser(userID)
+	if err != nil {
+		respondWithError(s, i, "❌ Error accessing user data. Database may be unavailable.")
+		return
+	}
+
+	// Claim all available bonuses
+	claimedBonuses, err := utils.BonusMgr.ClaimAllAvailableBonuses(user)
+	if err != nil {
+		respondWithError(s, i, "❌ An error occurred while claiming bonuses.")
+		return
+	}
+
+	if len(claimedBonuses) == 0 {
+		embed := &discordgo.MessageEmbed{
+			Title:       "🎁 Claim All Bonuses",
+			Description: "❌ No bonuses are currently available to claim.",
+			Color:       0xff6b6b,
+			Footer: &discordgo.MessageEmbedFooter{
+				Text: "Bonus System",
+			},
+			Timestamp: time.Now().Format(time.RFC3339),
+		}
+		
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Embeds: []*discordgo.MessageEmbed{embed},
+			},
+		})
+		return
+	}
+
+	// Calculate totals
+	var totalChips, totalXP int64
+	bonusTypes := make([]string, 0)
+	
+	for _, bonus := range claimedBonuses {
+		if bonus.Success && bonus.BonusInfo != nil {
+			totalChips += bonus.BonusInfo.ActualAmount
+			totalXP += bonus.BonusInfo.XPAmount
+			bonusTypes = append(bonusTypes, string(bonus.BonusInfo.Type))
+		}
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "🎁 Claim All Bonuses",
+		Description: fmt.Sprintf("Successfully claimed %d bonuses!", len(claimedBonuses)),
+		Color:       0x00ff00,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "💰 Total Chips",
+				Value:  fmt.Sprintf("%d %s", totalChips, utils.ChipsEmoji),
+				Inline: true,
+			},
+			{
+				Name:   "⭐ Total XP",
+				Value:  fmt.Sprintf("%d XP", totalXP),
+				Inline: true,
+			},
+			{
+				Name:   "🎯 Bonuses Claimed",
+				Value:  strings.Join(bonusTypes, ", "),
+				Inline: false,
+			},
+		},
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Bonus System",
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+	
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
+}
+
+func respondWithError(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: message,
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	})
 }

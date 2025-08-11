@@ -124,8 +124,8 @@ var (
 	dbMutex      sync.RWMutex
 )
 
-// InitializeDatabase initializes the database connection pool
-func InitializeDatabase() error {
+// SetupDatabase initializes the database connection pool
+func SetupDatabase() error {
 	dbMutex.Lock()
 	defer dbMutex.Unlock()
 
@@ -157,6 +157,12 @@ func InitializeDatabase() error {
 	dbInitialized = true
 
 	log.Printf("Database connection initialized successfully")
+	
+	// Create user_achievements table if it doesn't exist
+	if err := createUserAchievementsTable(); err != nil {
+		log.Printf("Warning: Failed to create user_achievements table: %v", err)
+	}
+	
 	return nil
 }
 
@@ -591,4 +597,32 @@ func UpdateJackpot(increment int64) (int64, error) {
 	}
 	
 	return newAmount, nil
+}
+
+// createUserAchievementsTable creates the user_achievements table if it doesn't exist
+func createUserAchievementsTable() error {
+	if DB == nil {
+		return fmt.Errorf("database not connected")
+	}
+
+	ctx := context.Background()
+	query := `
+		CREATE TABLE IF NOT EXISTS user_achievements (
+			id SERIAL PRIMARY KEY,
+			user_id BIGINT NOT NULL,
+			achievement_id INTEGER NOT NULL,
+			earned_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(user_id, achievement_id)
+		);
+		
+		CREATE INDEX IF NOT EXISTS idx_user_achievements_user_id ON user_achievements(user_id);
+		CREATE INDEX IF NOT EXISTS idx_user_achievements_achievement_id ON user_achievements(achievement_id);`
+
+	_, err := DB.Exec(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to create user_achievements table: %w", err)
+	}
+
+	log.Println("user_achievements table created/verified successfully")
+	return nil
 }
