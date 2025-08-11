@@ -69,34 +69,28 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	start := time.Now()
 	log.Printf("[slots] command invoked by user=%s", i.Member.User.ID)
 	betStr := i.ApplicationCommandData().Options[0].StringValue()
-	// Defer IMMEDIATELY to avoid 3s timeout regardless of downstream latency
-	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
-		log.Printf("[slots] failed immediate defer: %v", err)
-		return
-	}
-	log.Printf("[slots] deferred in %dms", time.Since(start).Milliseconds())
 
 	userID, _ := utils.ParseUserID(i.Member.User.ID)
 	user, err := utils.GetCachedUser(userID)
 	if err != nil {
-		utils.TryEphemeralFollowup(s, i, "Error fetching user data.")
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: "Error fetching user data.", Flags: discordgo.MessageFlagsEphemeral}})
 		return
 	}
 	bet, err := utils.ParseBet(betStr, user.Chips)
 	if err != nil {
-		utils.TryEphemeralFollowup(s, i, fmt.Sprintf("Bet error: %s", err.Error()))
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: fmt.Sprintf("Bet error: %s", err.Error()), Flags: discordgo.MessageFlagsEphemeral}})
 		return
 	}
 	adjusted, note := normalizeBetForPaylines(bet, user.Chips)
 	if adjusted == 0 {
-		utils.TryEphemeralFollowup(s, i, fmt.Sprintf("Bet must be at least %d and divisible by %d.", minBet, payLines))
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: fmt.Sprintf("Bet must be at least %d and divisible by %d.", minBet, payLines), Flags: discordgo.MessageFlagsEphemeral}})
 		return
 	}
 
 	game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, BetNote: note, Rand: rand.New(rand.NewSource(time.Now().UnixNano()))}
 	game.BaseGame.CountWinLossMinRatio = 0.20
 	if err := game.ValidateBet(); err != nil {
-		utils.TryEphemeralFollowup(s, i, err.Error())
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: err.Error(), Flags: discordgo.MessageFlagsEphemeral}})
 		return
 	}
 
@@ -104,22 +98,23 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, adjusted)
 	}
 
-	// Immediately show initial embed by editing original response so user doesn't stay on thinking state
 	initialEmbed := game.buildEmbed("", 0, 0, false, 0)
-	if err := utils.EditOriginalInteraction(s, i, initialEmbed, nil); err != nil {
-		log.Printf("[slots] failed to edit original interaction: %v", err)
-	} else {
-		// Fetch original message to get IDs for animation edits
-		if orig, err := s.InteractionResponse(i.Interaction); err == nil {
-			game.MessageID = orig.ID
-			game.ChannelID = orig.ChannelID
-			game.UsedOriginal = true
-			log.Printf("[slots] using original message id=%s channel=%s", game.MessageID, game.ChannelID)
-		} else {
-			log.Printf("[slots] could not fetch original response: %v", err)
-		}
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{initialEmbed}}}); err != nil {
+		log.Printf("[slots] failed initial respond: %v", err)
+		return
 	}
-	// Run play synchronously (we already deferred; no 3s pressure now)
+	// Retrieve original message for editing
+	orig, err := s.InteractionResponse(i.Interaction)
+	if err != nil {
+		log.Printf("[slots] could not fetch original response after initial send: %v", err)
+		return
+	}
+	game.MessageID = orig.ID
+	game.ChannelID = orig.ChannelID
+	game.UsedOriginal = true
+	log.Printf("[slots] initial response sent in %dms (msgID=%s)", time.Since(start).Milliseconds(), game.MessageID)
+
+	// Run synchronously
 	game.play()
 	log.Printf("[slots] play completed user=%s bet=%d", i.Member.User.ID, adjusted)
 }
