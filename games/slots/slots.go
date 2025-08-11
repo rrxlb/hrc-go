@@ -105,6 +105,7 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	// Run play asynchronously so we return control; animation + followups use webhook token
 	go game.play()
+	log.Printf("[slots] launched play goroutine user=%s bet=%d", i.Member.User.ID, adjusted)
 }
 
 // normalize bet to multiple of paylines
@@ -127,6 +128,13 @@ func normalizeBetForPaylines(bet, balance int64) (int64, string) {
 }
 
 func (g *Game) play() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[slots] panic recovered: %v", r)
+		}
+	}()
+	playStart := time.Now()
+	log.Printf("[slots] play() start user=%d bet=%d", g.UserID, g.Bet)
 	// Capture pre-game rank for rank-up detection
 	beforeRank := getRankForXP(func() int64 {
 		if g.BaseGame.UserData != nil {
@@ -138,14 +146,38 @@ func (g *Game) play() {
 	embed := g.buildEmbed("", 0, 0, false, 0)
 	msg, err := g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Embeds: []*discordgo.MessageEmbed{embed}})
 	if err != nil {
+		log.Printf("[slots] followup create failed: %v (attempting edit original)", err)
+		// Fallback: edit original interaction response
+		if _, editErr := g.Session.InteractionResponseEdit(g.Interaction.Interaction, &discordgo.WebhookEdit{Embeds: &[]*discordgo.MessageEmbed{embed}}); editErr != nil {
+			log.Printf("[slots] edit original also failed: %v", editErr)
+			return
+		} else {
+			log.Printf("[slots] fallback edit original succeeded")
+			// Try to fetch original to get ID (not strictly needed for animation; skip animation if no ID)
+			orig, getErr := g.Session.InteractionResponse(g.Interaction.Interaction)
+			if getErr == nil {
+				g.MessageID = orig.ID
+				g.ChannelID = orig.ChannelID
+			} else {
+				log.Printf("[slots] could not fetch original response: %v", getErr)
+			}
+		}
+	} else {
+		g.MessageID = msg.ID
+		g.ChannelID = msg.ChannelID
+		log.Printf("[slots] followup message created id=%s channel=%s", g.MessageID, g.ChannelID)
+	}
+
+	if g.MessageID == "" || g.ChannelID == "" {
+		log.Printf("[slots] missing message identifiers; aborting animation")
 		return
 	}
-	g.MessageID = msg.ID
-	g.ChannelID = msg.ChannelID
 	final := g.createReels()
+	log.Printf("[slots] reels generated user=%d symbols=%s", g.UserID, formatReels(final))
 	g.animateSpin(final)
 	g.Reels = final
 	totalWinnings, jackpotLine := g.calculateResults()
+	log.Printf("[slots] results calculated winnings=%d jackpotLine=%v", totalWinnings, jackpotLine)
 	jackpotPayout := int64(0)
 	if jackpotLine && utils.JackpotMgr != nil {
 		won, amount, _ := utils.JackpotMgr.TryWinJackpot(utils.JackpotSlots, g.UserID, g.Bet, 1.0) // guarantee on line
@@ -189,7 +221,11 @@ func (g *Game) play() {
 	components := []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{utils.CreateButton("slots_spin_again_"+g.MessageID, "Spin Again", discordgo.SuccessButton, false, nil)}}}
 	// Edit followup message (not original interaction)
 	embeds := []*discordgo.MessageEmbed{finalEmbed}
-	g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds, Components: &components})
+	if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds, Components: &components}); err != nil {
+		log.Printf("[slots] final edit failed: %v", err)
+	} else {
+		log.Printf("[slots] final edit success user=%d duration=%dms", g.UserID, time.Since(playStart).Milliseconds())
+	}
 	if g.BetNote != "" {
 		g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Content: g.BetNote, Flags: discordgo.MessageFlagsEphemeral})
 	}
