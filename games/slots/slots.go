@@ -67,56 +67,59 @@ func RegisterSlotsCommand() *discordgo.ApplicationCommand {
 // HandleSlotsCommand handles /slots
 func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	start := time.Now()
-	log.Printf("[slots] command invoked by user=%s", i.Member.User.ID)
-	betStr := i.ApplicationCommandData().Options[0].StringValue()
+	log.Printf("[slots] command invoked user=%s", i.Member.User.ID)
+	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
+		log.Printf("[slots] defer failed: %v", err)
+		return
+	}
+	log.Printf("[slots] deferred in %dms", time.Since(start).Milliseconds())
 
+	betStr := i.ApplicationCommandData().Options[0].StringValue()
 	userID, _ := utils.ParseUserID(i.Member.User.ID)
 	user, err := utils.GetCachedUser(userID)
 	if err != nil {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: "Error fetching user data.", Flags: discordgo.MessageFlagsEphemeral}})
+		editErr := utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", "Error fetching user.", 0xFF0000), nil)
+		log.Printf("[slots] user fetch error=%v editErr=%v", err, editErr)
 		return
 	}
 	bet, err := utils.ParseBet(betStr, user.Chips)
 	if err != nil {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: fmt.Sprintf("Bet error: %s", err.Error()), Flags: discordgo.MessageFlagsEphemeral}})
+		editErr := utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet error: %s", err.Error()), 0xFF0000), nil)
+		log.Printf("[slots] bet parse error=%v editErr=%v", err, editErr)
 		return
 	}
 	adjusted, note := normalizeBetForPaylines(bet, user.Chips)
 	if adjusted == 0 {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: fmt.Sprintf("Bet must be at least %d and divisible by %d.", minBet, payLines), Flags: discordgo.MessageFlagsEphemeral}})
+		editErr := utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet must be at least %d & divisible by %d", minBet, payLines), 0xFF0000), nil)
+		log.Printf("[slots] bet normalization failed editErr=%v", editErr)
 		return
 	}
-
-	game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, BetNote: note, Rand: rand.New(rand.NewSource(time.Now().UnixNano()))}
+	game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, BetNote: note, Rand: rand.New(rand.NewSource(time.Now().UnixNano())), UsedOriginal: true}
 	game.BaseGame.CountWinLossMinRatio = 0.20
 	if err := game.ValidateBet(); err != nil {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: err.Error(), Flags: discordgo.MessageFlagsEphemeral}})
+		editErr := utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", err.Error(), 0xFF0000), nil)
+		log.Printf("[slots] validate bet error=%v editErr=%v", err, editErr)
 		return
 	}
-
 	if utils.JackpotMgr != nil {
 		utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, adjusted)
 	}
-
-	initialEmbed := game.buildEmbed("", 0, 0, false, 0)
-	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{initialEmbed}}}); err != nil {
-		log.Printf("[slots] failed initial respond: %v", err)
+	initial := game.buildEmbed("", 0, 0, false, 0)
+	if err := utils.EditOriginalInteraction(s, i, initial, nil); err != nil {
+		log.Printf("[slots] initial edit failed: %v", err)
 		return
 	}
-	// Retrieve original message for editing
-	orig, err := s.InteractionResponse(i.Interaction)
-	if err != nil {
-		log.Printf("[slots] could not fetch original response after initial send: %v", err)
+	// Fetch message ID for animation
+	if orig, err := s.InteractionResponse(i.Interaction); err == nil {
+		game.MessageID = orig.ID
+		game.ChannelID = orig.ChannelID
+		log.Printf("[slots] obtained original message id=%s", game.MessageID)
+	} else {
+		log.Printf("[slots] failed to get original response: %v", err)
 		return
 	}
-	game.MessageID = orig.ID
-	game.ChannelID = orig.ChannelID
-	game.UsedOriginal = true
-	log.Printf("[slots] initial response sent in %dms (msgID=%s)", time.Since(start).Milliseconds(), game.MessageID)
-
-	// Run synchronously
 	game.play()
-	log.Printf("[slots] play completed user=%s bet=%d", i.Member.User.ID, adjusted)
+	log.Printf("[slots] play finished totalDuration=%dms", time.Since(start).Milliseconds())
 }
 
 // normalize bet to multiple of paylines
