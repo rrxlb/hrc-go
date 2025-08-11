@@ -214,8 +214,13 @@ func (g *Game) play() {
 	if profit > 0 {
 		xpGain = profit * utils.XPPerProfit
 	}
-	// We'll fetch jackpot amount asynchronously; placeholder now
+	// Fetch jackpot amount now so final embed shows current value
 	jackpotAmount := int64(0)
+	if utils.JackpotMgr != nil {
+		if amt, err := utils.JackpotMgr.GetJackpotAmount(utils.JackpotSlots); err == nil {
+			jackpotAmount = amt
+		}
+	}
 	outcome := "No wins this time. Better luck next time!"
 	if totalWinnings > 0 {
 		outcome = fmt.Sprintf("Congratulations! You won %s chips!", utils.FormatChips(totalWinnings))
@@ -241,22 +246,22 @@ func (g *Game) play() {
 		g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Content: g.BetNote, Flags: discordgo.MessageFlagsEphemeral})
 	}
 
-	// Async finalize DB + jackpot amount + rank-up
-	go func(profit, xpGain int64, before utils.Rank) {
+	initialJackpot := jackpotAmount
+	// Async finalize DB + potential jackpot change + rank-up
+	go func(profit, xpGain int64, before utils.Rank, initialJackpot int64) {
 		defer func() { recover() }()
 		updatedUser, err := g.EndGame(profit)
 		if err != nil {
 			log.Printf("[slots] EndGame error: %v", err)
 			return
 		}
-		var jackpotAmt int64 = 0
+		jackpotAmt := initialJackpot
 		if utils.JackpotMgr != nil {
 			if j, e := utils.JackpotMgr.GetJackpotAmount(utils.JackpotSlots); e == nil {
 				jackpotAmt = j
 			}
 		}
-		// Patch embed with real jackpot amount if zero before
-		if jackpotAmt > 0 {
+		if jackpotAmt != initialJackpot {
 			// Re-fetch message (optional)
 			finalEmbed2 := g.buildEmbed(formatReels(g.Reels), totalWinnings, xpGain, true, jackpotAmt)
 			finalEmbed2.Fields = append(finalEmbed2.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: outcome, Inline: false})
@@ -276,7 +281,7 @@ func (g *Game) play() {
 			g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Embeds: []*discordgo.MessageEmbed{utils.CreateBrandedEmbed("🎊 Rank Up!", fmt.Sprintf("%s %s → %s %s", before.Icon, before.Name, afterRank.Icon, afterRank.Name), 0xFFD700)}, Flags: discordgo.MessageFlagsEphemeral})
 		}
 		log.Printf("[slots] async finalize complete")
-	}(profit, xpGain, beforeRank)
+	}(profit, xpGain, beforeRank, initialJackpot)
 }
 
 func getRandomSymbol(r *rand.Rand) string {
@@ -384,9 +389,13 @@ func (g *Game) buildEmbed(reels string, winnings int64, xpGain int64, final bool
 	case "initial":
 		desc = "Spinning the reels..."
 	case "spinning":
-		desc = fmt.Sprintf("Spinning the reels...\n````\n%s\n````", reels)
+		if reels != "" {
+			desc = fmt.Sprintf("Spinning the reels...\n```\n%s\n```", reels)
+		} else {
+			desc = "Spinning the reels..."
+		}
 	case "final":
-		desc = fmt.Sprintf("````\n%s\n````", reels)
+		desc = fmt.Sprintf("```\n%s\n```", reels)
 	}
 
 	embed := utils.CreateBrandedEmbed(title, desc, color)
