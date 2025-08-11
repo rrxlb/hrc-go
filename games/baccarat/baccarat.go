@@ -200,7 +200,8 @@ func (g *Game) finishWithEdit(s *discordgo.Session, i *discordgo.InteractionCrea
 		utils.CreateButton("baccarat_banker", "Banker", discordgo.DangerButton, true, &discordgo.ComponentEmoji{Name: ""}),
 		utils.CreateButton("baccarat_tie", "Tie", discordgo.SecondaryButton, true, &discordgo.ComponentEmoji{Name: ""}),
 	)}
-	utils.UpdateInteractionResponse(s, g.Interaction, embed, components)
+	// Respond to the component interaction (required to avoid 'interaction failed')
+	_ = utils.UpdateComponentInteraction(s, i, embed, components)
 	delete(activeBaccaratGames, g.UserID)
 }
 
