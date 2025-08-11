@@ -462,6 +462,9 @@ func UpdateUser(userID int64, updates UserUpdateData) (*User, error) {
 // ParseBet parses a bet string and validates it
 func ParseBet(betStr string, userChips int64) (int64, error) {
 	betStr = strings.TrimSpace(strings.ToLower(betStr))
+	// Remove common formatting characters
+	betStr = strings.ReplaceAll(betStr, ",", "")
+	betStr = strings.ReplaceAll(betStr, "_", "")
 
 	// Handle special cases
 	switch betStr {

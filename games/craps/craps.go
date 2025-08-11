@@ -572,20 +572,72 @@ func (g *Game) betSummary() string {
 }
 
 func (g *Game) layoutString() string {
-	// Basic layout string focusing on place numbers and pass/don't
-	placeNums := []int{4, 5, 6, 8, 9, 10}
-	parts := []string{}
-	for _, n := range placeNums {
-		label := fmt.Sprintf("[%d]", n)
+	// Top numbers with markers: * for point, P for place bet
+	nums := []int{4, 5, 6, 8, 9, 10}
+	top := []string{}
+	for _, n := range nums {
+		mark := ""
 		if g.Point != nil && *g.Point == n {
-			label = fmt.Sprintf("[%d*]", n)
+			mark += "*"
 		}
 		if _, ok := g.Bets[fmt.Sprintf("place_%d", n)]; ok {
-			label = strings.Replace(label, "]", ":B]", 1)
+			mark += "P"
 		}
-		parts = append(parts, label)
+		cell := fmt.Sprintf("[%d% s]", n, mark)
+		cell = strings.ReplaceAll(cell, "% s", mark) // tidy spacing
+		// Normalize bracket if no mark
+		cell = strings.Replace(cell, "% ", "", -1)
+		top = append(top, cell)
 	}
-	return "`" + strings.Join(parts, " ") + "`"
+	line := strings.Repeat("_", 55)
+	passParts := []string{}
+	if v, ok := g.Bets["pass_line"]; ok {
+		passParts = append(passParts, fmt.Sprintf("Pass Line: %s", utils.FormatChips(v)))
+	}
+	if _, ok := g.Bets["come"]; ok {
+		passParts = append(passParts, "Come")
+	}
+	if _, ok := g.Bets["field"]; ok {
+		passParts = append(passParts, "Field")
+	}
+	passLine := ""
+	if len(passParts) > 0 {
+		passLine = strings.Join(passParts, " | ")
+	}
+	dontParts := []string{}
+	if _, ok := g.Bets["dont_pass"]; ok {
+		dontParts = append(dontParts, "Don't Pass")
+	}
+	if _, ok := g.Bets["dont_come"]; ok {
+		dontParts = append(dontParts, "Don't Come")
+	}
+	dontLine := ""
+	if len(dontParts) > 0 {
+		dontLine = strings.Join(dontParts, " | ")
+	}
+	// Hard ways summary inline markers
+	hardParts := []string{}
+	for _, h := range []int{4, 6, 8, 10} {
+		key := fmt.Sprintf("hard_%d", h)
+		if amt, ok := g.Bets[key]; ok {
+			hardParts = append(hardParts, fmt.Sprintf("H%d:%s", h, utils.FormatChips(amt)))
+		}
+	}
+	hardLine := strings.Join(hardParts, " | ")
+	sections := []string{
+		strings.Join(top, " "),
+		line,
+	}
+	if passLine != "" {
+		sections = append(sections, passLine, line)
+	}
+	if dontLine != "" {
+		sections = append(sections, dontLine, line)
+	}
+	if hardLine != "" {
+		sections = append(sections, hardLine)
+	}
+	return "`" + strings.Join(sections, "\n") + "`"
 }
 
 // Utility helpers
