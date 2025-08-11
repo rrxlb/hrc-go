@@ -14,22 +14,22 @@ import (
 type JackpotType string
 
 const (
-	JackpotSlots    JackpotType = "slots"
-	JackpotGeneral  JackpotType = "general"
-	JackpotSpecial  JackpotType = "special"
+	JackpotSlots   JackpotType = "slots"
+	JackpotGeneral JackpotType = "general"
+	JackpotSpecial JackpotType = "special"
 )
 
 // Jackpot represents a progressive jackpot
 type Jackpot struct {
-	ID              int         `json:"id"`
-	Type            JackpotType `json:"type"`
-	Amount          int64       `json:"amount"`
-	SeedAmount      int64       `json:"seed_amount"`
-	ContributionRate float64    `json:"contribution_rate"`
-	LastWinner      *int64      `json:"last_winner,omitempty"`
-	LastWinAmount   *int64      `json:"last_win_amount,omitempty"`
-	LastWinTime     *time.Time  `json:"last_win_time,omitempty"`
-	UpdatedAt       time.Time   `json:"updated_at"`
+	ID               int         `json:"id"`
+	Type             JackpotType `json:"type"`
+	Amount           int64       `json:"amount"`
+	SeedAmount       int64       `json:"seed_amount"`
+	ContributionRate float64     `json:"contribution_rate"`
+	LastWinner       *int64      `json:"last_winner,omitempty"`
+	LastWinAmount    *int64      `json:"last_win_amount,omitempty"`
+	LastWinTime      *time.Time  `json:"last_win_time,omitempty"`
+	UpdatedAt        time.Time   `json:"updated_at"`
 }
 
 // JackpotManager manages progressive jackpots
@@ -43,12 +43,12 @@ var JackpotMgr *JackpotManager
 
 // Jackpot configuration constants
 const (
-	DefaultSlotsJackpot       = 100000  // 100k starting jackpot for slots
-	DefaultGeneralJackpot     = 50000   // 50k starting jackpot for general games
-	SlotsContributionRate     = 0.01    // 1% of each slots bet goes to jackpot
-	GeneralContributionRate   = 0.005   // 0.5% of other game bets goes to jackpot
-	MinimumJackpotAmount      = 10000   // Minimum jackpot before reset
-	JackpotWinThreshold       = 1000000 // Jackpot win probability threshold
+	DefaultSlotsJackpot     = 100000  // 100k starting jackpot for slots
+	DefaultGeneralJackpot   = 50000   // 50k starting jackpot for general games
+	SlotsContributionRate   = 0.01    // 1% of each slots bet goes to jackpot
+	GeneralContributionRate = 0.005   // 0.5% of other game bets goes to jackpot
+	MinimumJackpotAmount    = 10000   // Minimum jackpot before reset
+	JackpotWinThreshold     = 1000000 // Jackpot win probability threshold
 )
 
 // InitializeJackpotManager sets up the jackpot system
@@ -56,12 +56,12 @@ func InitializeJackpotManager() error {
 	JackpotMgr = &JackpotManager{
 		jackpots: make(map[JackpotType]*Jackpot),
 	}
-	
+
 	// Create jackpots table if it doesn't exist
 	if err := JackpotMgr.createJackpotsTable(); err != nil {
 		return fmt.Errorf("failed to create jackpots table: %w", err)
 	}
-	
+
 	// Load existing jackpots or create defaults
 	return JackpotMgr.loadJackpots()
 }
@@ -127,7 +127,7 @@ func (jm *JackpotManager) loadJackpots() error {
 	for rows.Next() {
 		var jackpot Jackpot
 		var jackpotType string
-		
+
 		err := rows.Scan(
 			&jackpot.ID,
 			&jackpotType,
@@ -161,21 +161,21 @@ func (jm *JackpotManager) loadJackpots() error {
 // initializeDefaultJackpots sets up default jackpot configurations
 func (jm *JackpotManager) initializeDefaultJackpots() {
 	now := time.Now()
-	
+
 	defaultJackpots := []*Jackpot{
 		{
-			Type:            JackpotSlots,
-			Amount:          DefaultSlotsJackpot,
-			SeedAmount:      DefaultSlotsJackpot,
+			Type:             JackpotSlots,
+			Amount:           DefaultSlotsJackpot,
+			SeedAmount:       DefaultSlotsJackpot,
 			ContributionRate: SlotsContributionRate,
-			UpdatedAt:       now,
+			UpdatedAt:        now,
 		},
 		{
-			Type:            JackpotGeneral,
-			Amount:          DefaultGeneralJackpot,
-			SeedAmount:      DefaultGeneralJackpot,
+			Type:             JackpotGeneral,
+			Amount:           DefaultGeneralJackpot,
+			SeedAmount:       DefaultGeneralJackpot,
 			ContributionRate: GeneralContributionRate,
-			UpdatedAt:       now,
+			UpdatedAt:        now,
 		},
 	}
 
@@ -255,7 +255,7 @@ func (jm *JackpotManager) ContributeToJackpot(jackpotType JackpotType, betAmount
 
 	log.Printf("Added %d chips to %s jackpot (bet: %d, rate: %.4f). New total: %d",
 		contribution, jackpotType, betAmount, jackpot.ContributionRate, jackpot.Amount)
-	
+
 	return contribution, nil
 }
 
@@ -306,21 +306,21 @@ func (jm *JackpotManager) TryWinJackpot(jackpotType JackpotType, userID int64, b
 	// Simulate random chance (in production, you'd use proper RNG)
 	// For now, use simple probability check
 	// adjustedProbability * 1000000 would be threshold if using integer RNG; kept implicit
-	
+
 	// Simplified win condition - in production you'd use crypto/rand
 	timestamp := time.Now().UnixNano()
 	randomValue := float64(timestamp%1000000) / 1000000.0
-	
+
 	if randomValue <= adjustedProbability {
 		// JACKPOT WON!
 		winAmount := jackpot.Amount
-		
+
 		// Record the win
 		now := time.Now()
 		jackpot.LastWinner = &userID
 		jackpot.LastWinAmount = &winAmount
 		jackpot.LastWinTime = &now
-		
+
 		// Reset jackpot to seed amount
 		jackpot.Amount = jackpot.SeedAmount
 		jackpot.UpdatedAt = now
@@ -334,7 +334,7 @@ func (jm *JackpotManager) TryWinJackpot(jackpotType JackpotType, userID int64, b
 
 		log.Printf("🎉 JACKPOT WON! User %d won %d chips from %s jackpot (bet: %d, probability: %.8f)",
 			userID, winAmount, jackpotType, betAmount, adjustedProbability)
-		
+
 		return true, winAmount, nil
 	}
 
@@ -367,7 +367,7 @@ func (jm *JackpotManager) GetAllJackpots() map[JackpotType]*Jackpot {
 		jackpotCopy := *jackpot
 		result[jackpotType] = &jackpotCopy
 	}
-	
+
 	return result
 }
 
@@ -434,17 +434,17 @@ func (jm *JackpotManager) AddJackpotAmount(jackpotType JackpotType, amount int64
 
 // GetJackpotStats returns statistics about all jackpots
 type JackpotStats struct {
-	TotalAmount       int64                    `json:"total_amount"`
-	JackpotCount      int                      `json:"jackpot_count"`
-	LastWinInfo       *JackpotWinInfo          `json:"last_win_info,omitempty"`
-	JackpotAmounts    map[JackpotType]int64    `json:"jackpot_amounts"`
+	TotalAmount    int64                 `json:"total_amount"`
+	JackpotCount   int                   `json:"jackpot_count"`
+	LastWinInfo    *JackpotWinInfo       `json:"last_win_info,omitempty"`
+	JackpotAmounts map[JackpotType]int64 `json:"jackpot_amounts"`
 }
 
 type JackpotWinInfo struct {
-	Type      JackpotType `json:"type"`
-	Winner    int64       `json:"winner"`
-	Amount    int64       `json:"amount"`
-	WinTime   time.Time   `json:"win_time"`
+	Type    JackpotType `json:"type"`
+	Winner  int64       `json:"winner"`
+	Amount  int64       `json:"amount"`
+	WinTime time.Time   `json:"win_time"`
 }
 
 func (jm *JackpotManager) GetJackpotStats() *JackpotStats {

@@ -14,7 +14,7 @@ type AchievementCategory string
 const (
 	CategoryFirstSteps AchievementCategory = "First Steps"
 	CategoryWins       AchievementCategory = "Wins"
-	CategoryWealth     AchievementCategory = "Wealth" 
+	CategoryWealth     AchievementCategory = "Wealth"
 	CategoryExperience AchievementCategory = "Experience"
 	CategoryPrestige   AchievementCategory = "Prestige"
 	CategoryGaming     AchievementCategory = "Gaming"
@@ -26,14 +26,14 @@ const (
 type RequirementType string
 
 const (
-	RequirementChips         RequirementType = "chips"
-	RequirementWins          RequirementType = "wins"
-	RequirementTotalXP       RequirementType = "total_xp"
-	RequirementPrestige      RequirementType = "prestige"
-	RequirementGamesPlayed   RequirementType = "games_played"
-	RequirementDailyBonuses  RequirementType = "daily_bonuses"
-	RequirementVotes         RequirementType = "votes"
-	RequirementSpecial       RequirementType = "special"
+	RequirementChips        RequirementType = "chips"
+	RequirementWins         RequirementType = "wins"
+	RequirementTotalXP      RequirementType = "total_xp"
+	RequirementPrestige     RequirementType = "prestige"
+	RequirementGamesPlayed  RequirementType = "games_played"
+	RequirementDailyBonuses RequirementType = "daily_bonuses"
+	RequirementVotes        RequirementType = "votes"
+	RequirementSpecial      RequirementType = "special"
 )
 
 // AchievementChecker interface for checking if achievements are earned
@@ -81,7 +81,7 @@ func InitializeAchievementManager() error {
 		achievements: make(map[int]*Achievement),
 		checker:      &DefaultAchievementChecker{},
 	}
-	
+
 	// Load achievements from database
 	return AchievementMgr.LoadAchievements()
 }
@@ -373,7 +373,7 @@ func (am *AchievementManager) AwardAchievement(userID int64, achievementID int) 
 	if achievement != nil {
 		log.Printf("Awarded achievement '%s' to user %d", achievement.Name, userID)
 	}
-	
+
 	return nil
 }
 

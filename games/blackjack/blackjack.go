@@ -19,15 +19,15 @@ var gamesMutex sync.RWMutex
 // BlackjackGame represents a blackjack game instance
 type BlackjackGame struct {
 	*utils.BaseGame
-	GameID        string
-	Bets          []int64
-	Deck          *utils.Deck
-	PlayerHands   []*utils.Hand
-	DealerHand    *utils.Hand
-	CurrentHand   int
-	InsuranceBet  int64
-	Results       []GameResult
-	View          *utils.BlackjackView
+	GameID       string
+	Bets         []int64
+	Deck         *utils.Deck
+	PlayerHands  []*utils.Hand
+	DealerHand   *utils.Hand
+	CurrentHand  int
+	InsuranceBet int64
+	Results      []GameResult
+	View         *utils.BlackjackView
 }
 
 // GameResult represents the result of a blackjack hand
@@ -40,22 +40,22 @@ type GameResult struct {
 // NewBlackjackGame creates a new blackjack game instance
 func NewBlackjackGame(session *discordgo.Session, interaction *discordgo.InteractionCreate, bet int64) *BlackjackGame {
 	baseGame := utils.NewBaseGame(session, interaction, bet, "blackjack")
-	
+
 	gameID := fmt.Sprintf("blackjack_%d_%d", baseGame.UserID, time.Now().Unix())
-	
+
 	game := &BlackjackGame{
-		BaseGame:      baseGame,
-		GameID:        gameID,
-		Bets:          []int64{bet},
-		Deck:          utils.NewDeck(utils.DeckCount, "blackjack"),
-		PlayerHands:   []*utils.Hand{utils.NewHand("blackjack")},
-		DealerHand:    utils.NewHand("blackjack"),
-		CurrentHand:   0,
-		InsuranceBet:  0,
-		Results:       make([]GameResult, 0),
-		View:          utils.NewBlackjackView(baseGame.UserID, gameID),
+		BaseGame:     baseGame,
+		GameID:       gameID,
+		Bets:         []int64{bet},
+		Deck:         utils.NewDeck(utils.DeckCount, "blackjack"),
+		PlayerHands:  []*utils.Hand{utils.NewHand("blackjack")},
+		DealerHand:   utils.NewHand("blackjack"),
+		CurrentHand:  0,
+		InsuranceBet: 0,
+		Results:      make([]GameResult, 0),
+		View:         utils.NewBlackjackView(baseGame.UserID, gameID),
 	}
-	
+
 	return game
 }
 
@@ -66,29 +66,29 @@ func (bg *BlackjackGame) StartGame() error {
 	bg.DealerHand.AddCard(bg.Deck.Deal())
 	bg.PlayerHands[0].AddCard(bg.Deck.Deal())
 	bg.DealerHand.AddCard(bg.Deck.Deal())
-	
+
 	// Check for natural blackjack
 	playerValue := bg.PlayerHands[0].GetValue()
 	dealerUpCard := bg.DealerHand.Cards[0]
-	
+
 	// Update view options
 	bg.updateViewOptions()
-	
+
 	if playerValue == 21 {
 		// Player has blackjack, finish the game immediately
 		return bg.finishGame()
 	}
-	
+
 	// Check if dealer has potential blackjack
 	if dealerUpCard.IsAce() || dealerUpCard.IsTen() {
 		// In a full implementation, you might offer insurance here
 		// For now, just continue with normal play
 	}
-	
+
 	// Send initial game state
 	embed := bg.createGameEmbed(false)
 	components := bg.View.GetComponents()
-	
+
 	return utils.SendInteractionResponse(bg.Session, bg.Interaction, embed, components, false)
 }
 
@@ -97,15 +97,15 @@ func (bg *BlackjackGame) HandleHit() error {
 	if bg.IsGameOver() {
 		return fmt.Errorf("game is already over")
 	}
-	
+
 	currentHand := bg.PlayerHands[bg.CurrentHand]
 	currentHand.AddCard(bg.Deck.Deal())
-	
+
 	// Check if hand is busted or has 5 cards
 	if currentHand.IsBust() || currentHand.Size() >= 5 {
 		return bg.standCurrentHand()
 	}
-	
+
 	bg.updateViewOptions()
 	return bg.updateGameState()
 }
@@ -115,7 +115,7 @@ func (bg *BlackjackGame) HandleStand() error {
 	if bg.IsGameOver() {
 		return fmt.Errorf("game is already over")
 	}
-	
+
 	return bg.standCurrentHand()
 }
 
@@ -124,19 +124,19 @@ func (bg *BlackjackGame) HandleDouble() error {
 	if bg.IsGameOver() {
 		return fmt.Errorf("game is already over")
 	}
-	
+
 	// Check if player can afford to double
 	if bg.UserData.Chips < bg.Bets[bg.CurrentHand] {
 		return fmt.Errorf("insufficient chips to double down")
 	}
-	
+
 	// Double the bet
 	bg.Bets[bg.CurrentHand] *= 2
-	
+
 	// Deal one card and stand
 	currentHand := bg.PlayerHands[bg.CurrentHand]
 	currentHand.AddCard(bg.Deck.Deal())
-	
+
 	return bg.standCurrentHand()
 }
 
@@ -145,29 +145,29 @@ func (bg *BlackjackGame) HandleSplit() error {
 	if bg.IsGameOver() {
 		return fmt.Errorf("game is already over")
 	}
-	
+
 	currentHand := bg.PlayerHands[bg.CurrentHand]
 	if !currentHand.CanSplit() {
 		return fmt.Errorf("cannot split this hand")
 	}
-	
+
 	// Check if player can afford to split
 	if bg.UserData.Chips < bg.Bets[bg.CurrentHand] {
 		return fmt.Errorf("insufficient chips to split")
 	}
-	
+
 	// Split the hand
 	hand1, hand2 := currentHand.Split()
-	
+
 	// Deal one card to each new hand
 	hand1.AddCard(bg.Deck.Deal())
 	hand2.AddCard(bg.Deck.Deal())
-	
+
 	// Update game state
 	bg.PlayerHands[bg.CurrentHand] = hand1
 	bg.PlayerHands = append(bg.PlayerHands, hand2)
 	bg.Bets = append(bg.Bets, bg.Bets[bg.CurrentHand])
-	
+
 	bg.updateViewOptions()
 	return bg.updateGameState()
 }
@@ -175,12 +175,12 @@ func (bg *BlackjackGame) HandleSplit() error {
 // standCurrentHand moves to the next hand or finishes the game
 func (bg *BlackjackGame) standCurrentHand() error {
 	bg.CurrentHand++
-	
+
 	if bg.CurrentHand >= len(bg.PlayerHands) {
 		// All hands completed, finish the game
 		return bg.finishGame()
 	}
-	
+
 	// Move to next hand
 	bg.updateViewOptions()
 	return bg.updateGameState()
@@ -190,36 +190,36 @@ func (bg *BlackjackGame) standCurrentHand() error {
 func (bg *BlackjackGame) finishGame() error {
 	// Play dealer hand
 	bg.playDealerHand()
-	
+
 	// Calculate results for each hand
 	totalProfit := int64(0)
-	
+
 	for i, hand := range bg.PlayerHands {
 		result := bg.calculateHandResult(hand, i)
 		bg.Results = append(bg.Results, result)
-		
+
 		payout := int64(float64(bg.Bets[i]) * result.Payout)
 		totalProfit += payout - bg.Bets[i] // Subtract original bet
 	}
-	
+
 	// End the base game
 	updatedUser, err := bg.EndGame(totalProfit)
 	if err != nil {
 		return fmt.Errorf("failed to end game: %w", err)
 	}
-	
+
 	// Update the user data
 	bg.UserData = updatedUser
-	
+
 	// Send final game state
 	embed := bg.createGameEmbed(true)
 	components := bg.View.DisableAllButtons()
-	
+
 	// Clean up the game
 	gamesMutex.Lock()
 	delete(ActiveGames, bg.GameID)
 	gamesMutex.Unlock()
-	
+
 	return utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
 }
 
@@ -233,12 +233,12 @@ func (bg *BlackjackGame) playDealerHand() {
 			break
 		}
 	}
-	
+
 	// If all players are busted, dealer doesn't play
 	if !anyPlayerNotBusted {
 		return
 	}
-	
+
 	// Dealer plays: hit on soft 17 and below, stand on hard 17 and above
 	for bg.DealerHand.GetValue() < utils.DealerStandValue {
 		bg.DealerHand.AddCard(bg.Deck.Deal())
@@ -249,7 +249,7 @@ func (bg *BlackjackGame) playDealerHand() {
 func (bg *BlackjackGame) calculateHandResult(hand *utils.Hand, handIndex int) GameResult {
 	playerValue := hand.GetValue()
 	dealerValue := bg.DealerHand.GetValue()
-	
+
 	// Check for player bust
 	if hand.IsBust() {
 		return GameResult{
@@ -258,7 +258,7 @@ func (bg *BlackjackGame) calculateHandResult(hand *utils.Hand, handIndex int) Ga
 			Payout:    0.0,
 		}
 	}
-	
+
 	// Check for five card charlie
 	if hand.IsFiveCardCharlie() {
 		return GameResult{
@@ -267,7 +267,7 @@ func (bg *BlackjackGame) calculateHandResult(hand *utils.Hand, handIndex int) Ga
 			Payout:    1.0 + utils.FiveCardCharliePayout,
 		}
 	}
-	
+
 	// Check for blackjack
 	if hand.IsBlackjack() {
 		if bg.DealerHand.IsBlackjack() {
@@ -283,7 +283,7 @@ func (bg *BlackjackGame) calculateHandResult(hand *utils.Hand, handIndex int) Ga
 			Payout:    1.0 + utils.BlackjackPayout,
 		}
 	}
-	
+
 	// Check for dealer bust
 	if bg.DealerHand.IsBust() {
 		return GameResult{
@@ -292,7 +292,7 @@ func (bg *BlackjackGame) calculateHandResult(hand *utils.Hand, handIndex int) Ga
 			Payout:    2.0, // Return bet + winnings
 		}
 	}
-	
+
 	// Compare values
 	if playerValue > dealerValue {
 		return GameResult{
@@ -324,16 +324,16 @@ func (bg *BlackjackGame) updateViewOptions() {
 		bg.View.CanSplit = false
 		return
 	}
-	
+
 	currentHand := bg.PlayerHands[bg.CurrentHand]
-	
+
 	// Basic actions
 	bg.View.CanHit = !currentHand.IsBust()
 	bg.View.CanStand = true
-	
+
 	// Double down: only on first two cards and if player has enough chips
 	bg.View.CanDouble = currentHand.Size() == 2 && bg.UserData.Chips >= bg.Bets[bg.CurrentHand]
-	
+
 	// Split: only on first two cards of same rank/value and if player has enough chips
 	bg.View.CanSplit = currentHand.CanSplit() && bg.UserData.Chips >= bg.Bets[bg.CurrentHand]
 }
@@ -342,7 +342,7 @@ func (bg *BlackjackGame) updateViewOptions() {
 func (bg *BlackjackGame) updateGameState() error {
 	embed := bg.createGameEmbed(false)
 	components := bg.View.GetComponents()
-	
+
 	return utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
 }
 
@@ -353,7 +353,12 @@ func (bg *BlackjackGame) createGameEmbed(gameOver bool) *discordgo.MessageEmbed 
 	hasAces := false
 	for idx, hand := range bg.PlayerHands {
 		cards := make([]string, len(hand.Cards))
-		for i, c := range hand.Cards { cards[i] = c.String(); if c.IsAce() { hasAces = true } }
+		for i, c := range hand.Cards {
+			cards[i] = c.String()
+			if c.IsAce() {
+				hasAces = true
+			}
+		}
 		playerHandData = append(playerHandData, utils.HandData{Hand: cards, Score: hand.GetValue(), IsActive: idx == bg.CurrentHand && !gameOver})
 	}
 
@@ -361,7 +366,9 @@ func (bg *BlackjackGame) createGameEmbed(gameOver bool) *discordgo.MessageEmbed 
 	var dealerCards []string
 	dealerValue := 0
 	if gameOver {
-		for _, c := range bg.DealerHand.Cards { dealerCards = append(dealerCards, c.String()) }
+		for _, c := range bg.DealerHand.Cards {
+			dealerCards = append(dealerCards, c.String())
+		}
 		dealerValue = bg.DealerHand.GetValue()
 	} else {
 		if len(bg.DealerHand.Cards) > 0 {
@@ -372,7 +379,9 @@ func (bg *BlackjackGame) createGameEmbed(gameOver bool) *discordgo.MessageEmbed 
 	}
 
 	totalBet := int64(0)
-	for _, b := range bg.Bets { totalBet += b }
+	for _, b := range bg.Bets {
+		totalBet += b
+	}
 
 	// Outcome aggregation if game over
 	outcomeText := ""
@@ -383,7 +392,11 @@ func (bg *BlackjackGame) createGameEmbed(gameOver bool) *discordgo.MessageEmbed 
 		for _, r := range bg.Results {
 			payout := int64(float64(bg.Bets[r.HandIndex]) * r.Payout)
 			totalPayout += payout
-			if len(bg.Results) > 1 { outcomeText += fmt.Sprintf("Hand %d: %s (%s %s)\n", r.HandIndex+1, r.Result, utils.FormatChips(payout), utils.ChipsEmoji) } else { outcomeText = fmt.Sprintf("%s (%s %s)", r.Result, utils.FormatChips(payout), utils.ChipsEmoji) }
+			if len(bg.Results) > 1 {
+				outcomeText += fmt.Sprintf("Hand %d: %s (%s %s)\n", r.HandIndex+1, r.Result, utils.FormatChips(payout), utils.ChipsEmoji)
+			} else {
+				outcomeText = fmt.Sprintf("%s (%s %s)", r.Result, utils.FormatChips(payout), utils.ChipsEmoji)
+			}
 		}
 		profit = totalPayout - totalBet
 	}
@@ -424,65 +437,65 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 	// Parse bet amount
 	betOption := i.ApplicationCommandData().Options[0]
 	betStr := betOption.StringValue()
-	
+
 	userID, err := parseUserID(i.Member.User.ID)
 	if err != nil {
 		respondWithError(s, i, "Failed to parse user ID")
 		return
 	}
-	
+
 	// Get user data to validate bet
 	user, err := utils.GetCachedUser(userID)
 	if err != nil {
 		respondWithError(s, i, "Failed to get user data")
 		return
 	}
-	
+
 	// Parse and validate bet
 	bet, err := utils.ParseBet(betStr, user.Chips)
 	if err != nil {
 		respondWithError(s, i, "Invalid bet amount: "+err.Error())
 		return
 	}
-	
+
 	if bet <= 0 {
 		respondWithError(s, i, "Bet amount must be greater than 0")
 		return
 	}
-	
+
 	if user.Chips < bet {
 		embed := utils.InsufficientChipsEmbed(bet, user.Chips, "blackjack")
 		utils.SendInteractionResponse(s, i, embed, nil, true)
 		return
 	}
-	
+
 	// Create and start new game
 	game := NewBlackjackGame(s, i, bet)
 	game.UserData = user
-	
+
 	// Validate bet using base game
 	if err := game.ValidateBet(); err != nil {
 		respondWithError(s, i, err.Error())
 		return
 	}
-	
+
 	// Store game in active games
 	gamesMutex.Lock()
 	ActiveGames[game.GameID] = game
 	gamesMutex.Unlock()
-	
+
 	// Start the game
 	if err := game.StartGame(); err != nil {
 		log.Printf("Failed to start blackjack game: %v", err)
 		respondWithError(s, i, "Failed to start game")
-		
+
 		// Clean up failed game
 		gamesMutex.Lock()
 		delete(ActiveGames, game.GameID)
 		gamesMutex.Unlock()
 		return
 	}
-	
+
 	log.Printf("Started blackjack game %s for user %d with bet %d", game.GameID, userID, bet)
 }
 
@@ -494,7 +507,7 @@ func HandleBlackjackInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		respondWithError(s, i, "Failed to parse user ID")
 		return
 	}
-	
+
 	// Find the user's active game
 	gamesMutex.RLock()
 	var game *BlackjackGame
@@ -505,15 +518,15 @@ func HandleBlackjackInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		}
 	}
 	gamesMutex.RUnlock()
-	
+
 	if game == nil {
 		respondWithError(s, i, "No active blackjack game found")
 		return
 	}
-	
+
 	// Update the interaction reference
 	game.Interaction = i
-	
+
 	// Handle the specific action
 	var actionErr error
 	switch customID {
@@ -529,13 +542,13 @@ func HandleBlackjackInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		respondWithError(s, i, "Unknown blackjack action")
 		return
 	}
-	
+
 	if actionErr != nil {
 		log.Printf("Blackjack action error: %v", actionErr)
 		respondWithError(s, i, actionErr.Error())
 		return
 	}
-	
+
 	log.Printf("Processed blackjack action %s for game %s", customID, game.GameID)
 }
 
@@ -552,7 +565,7 @@ func respondWithError(s *discordgo.Session, i *discordgo.InteractionCreate, mess
 		message,
 		0xFF0000, // Red
 	)
-	
+
 	utils.SendInteractionResponse(s, i, embed, nil, true)
 }
 

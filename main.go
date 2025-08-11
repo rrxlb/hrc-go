@@ -106,7 +106,7 @@ func main() {
 func onReady(s *discordgo.Session, event *discordgo.Ready) {
 	log.Printf("✅ Discord Bot logged in as %s (ID: %s)", event.User.Username, event.User.ID)
 	botStatus = "online"
-	
+
 	// Set bot presence
 	if err := s.UpdateStatusComplex(discordgo.UpdateStatusData{
 		Activities: []*discordgo.Activity{
@@ -119,7 +119,7 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 	}); err != nil {
 		log.Printf("Failed to update status: %v", err)
 	}
-	
+
 	// Register slash commands
 	if err := registerSlashCommands(s); err != nil {
 		log.Printf("Failed to register slash commands: %v", err)
@@ -173,7 +173,7 @@ func registerSlashCommands(s *discordgo.Session) error {
 			return fmt.Errorf("failed to create command %s: %w", command.Name, err)
 		}
 	}
-	
+
 	log.Printf("Successfully registered %d slash commands", len(commands))
 	return nil
 }
@@ -182,7 +182,7 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.Type != discordgo.InteractionApplicationCommand {
 		return
 	}
-	
+
 	switch i.ApplicationCommandData().Name {
 	case "ping":
 		handlePingCommand(s, i)
@@ -211,9 +211,9 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.Type != discordgo.InteractionMessageComponent {
 		return
 	}
-	
+
 	customID := i.MessageComponentData().CustomID
-	
+
 	// Route button interactions to appropriate handlers
 	if strings.HasPrefix(customID, "blackjack_") {
 		blackjack.HandleBlackjackInteraction(s, i)
@@ -222,10 +222,10 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 func handlePingCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	startTime := time.Now()
-	
+
 	// Calculate approximate latency
 	latency := s.HeartbeatLatency()
-	
+
 	embed := &discordgo.MessageEmbed{
 		Title: "🏓 Pong!",
 		Color: 0x5865F2,
@@ -317,7 +317,7 @@ func handleProfileCommand(s *discordgo.Session, i *discordgo.InteractionCreate) 
 
 	// Get rank information
 	rankName, rankIcon, rankColor, nextRankXP := utils.GetRank(user.TotalXP)
-	
+
 	// Calculate win rate
 	totalGames := user.Wins + user.Losses
 	winRate := 0.0
@@ -411,10 +411,10 @@ func handleBalanceCommand(s *discordgo.Session, i *discordgo.InteractionCreate) 
 	}
 
 	embed := &discordgo.MessageEmbed{
-		Title: fmt.Sprintf("💰 %s's Balance", username),
-		Color: 0x5865F2,
+		Title:       fmt.Sprintf("💰 %s's Balance", username),
+		Color:       0x5865F2,
 		Description: fmt.Sprintf("You currently have **%d** <:chips:1396988413151940629> chips", user.Chips),
-		Timestamp: time.Now().Format(time.RFC3339),
+		Timestamp:   time.Now().Format(time.RFC3339),
 	}
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -451,7 +451,7 @@ func startHealthServer() {
 
 func handleBonusCommand(s *discordgo.Session, i *discordgo.InteractionCreate, bonusType utils.BonusType) {
 	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
-	
+
 	// Get or create user
 	user, err := utils.GetCachedUser(userID)
 	if err != nil {
@@ -469,7 +469,7 @@ func handleBonusCommand(s *discordgo.Session, i *discordgo.InteractionCreate, bo
 	// Create and send embed
 	title := fmt.Sprintf("%s Bonus", string(bonusType))
 	embed := utils.BonusMgr.CreateBonusEmbed(user, result, title)
-	
+
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
@@ -480,7 +480,7 @@ func handleBonusCommand(s *discordgo.Session, i *discordgo.InteractionCreate, bo
 
 func handleCooldownsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
-	
+
 	// Get or create user
 	user, err := utils.GetCachedUser(userID)
 	if err != nil {
@@ -490,7 +490,7 @@ func handleCooldownsCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 
 	// Create cooldown embed
 	embed := utils.BonusMgr.CreateCooldownEmbed(user)
-	
+
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
@@ -501,7 +501,7 @@ func handleCooldownsCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 
 func handleClaimAllCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
-	
+
 	// Get or create user
 	user, err := utils.GetCachedUser(userID)
 	if err != nil {
@@ -526,7 +526,7 @@ func handleClaimAllCommand(s *discordgo.Session, i *discordgo.InteractionCreate)
 			},
 			Timestamp: time.Now().Format(time.RFC3339),
 		}
-		
+
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -539,7 +539,7 @@ func handleClaimAllCommand(s *discordgo.Session, i *discordgo.InteractionCreate)
 	// Calculate totals
 	var totalChips, totalXP int64
 	bonusTypes := make([]string, 0)
-	
+
 	for _, bonus := range claimedBonuses {
 		if bonus.Success && bonus.BonusInfo != nil {
 			totalChips += bonus.BonusInfo.ActualAmount
@@ -574,7 +574,7 @@ func handleClaimAllCommand(s *discordgo.Session, i *discordgo.InteractionCreate)
 		},
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
-	
+
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
