@@ -178,32 +178,35 @@ func (jm *JackpotManager) loadJackpots() error {
 // initializeDefaultJackpots sets up default jackpot configurations
 func (jm *JackpotManager) initializeDefaultJackpots() {
 	now := time.Now()
-
-	defaultJackpots := []*Jackpot{
-		{
-			Type:             JackpotSlots,
-			Amount:           DefaultSlotsJackpot,
-			SeedAmount:       DefaultSlotsJackpot,
-			ContributionRate: SlotsContributionRate,
-			UpdatedAt:        now,
-		},
-		{
-			Type:             JackpotGeneral,
-			Amount:           DefaultGeneralJackpot,
-			SeedAmount:       DefaultGeneralJackpot,
-			ContributionRate: GeneralContributionRate,
-			UpdatedAt:        now,
-		},
-	}
-
+	// Only slots jackpot for now
+	defaultJackpots := []*Jackpot{{
+		Type:             JackpotSlots,
+		Amount:           DefaultSlotsJackpot,
+		SeedAmount:       DefaultSlotsJackpot,
+		ContributionRate: SlotsContributionRate,
+		UpdatedAt:        now,
+	}}
 	jm.mutex.Lock()
 	defer jm.mutex.Unlock()
-
-	for _, jackpot := range defaultJackpots {
-		jm.jackpots[jackpot.Type] = jackpot
+	for _, jp := range defaultJackpots {
+		jm.jackpots[jp.Type] = jp
 	}
+	log.Printf("Initialized %d default jackpots (slots only)", len(defaultJackpots))
+}
 
-	log.Printf("Initialized %d default jackpots", len(defaultJackpots))
+// Prune unwanted jackpot types (e.g., remove legacy 'general')
+func (jm *JackpotManager) PruneToSlotsOnly() {
+	allowed := map[JackpotType]struct{}{JackpotSlots: {}}
+	jm.mutex.Lock()
+	for t := range jm.jackpots {
+		if _, ok := allowed[t]; !ok {
+			delete(jm.jackpots, t)
+		}
+	}
+	jm.mutex.Unlock()
+	if DB != nil {
+		DB.Exec(context.Background(), "DELETE FROM jackpots WHERE type <> $1", string(JackpotSlots))
+	}
 }
 
 // saveDefaultJackpots saves default jackpots to database

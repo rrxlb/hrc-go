@@ -231,6 +231,14 @@ func (g *Game) play() {
 	}
 	g.Phase = phaseFinal
 	finalEmbed := g.buildEmbed(formatReels(g.Reels), totalWinnings, xpGain, true, jackpotAmount)
+	// Profit/Loss field
+	plLabel := "Profit"
+	plVal := fmt.Sprintf("+%s %s", utils.FormatChips(profit), utils.ChipsEmoji)
+	if profit < 0 {
+		plLabel = "Loss"
+		plVal = fmt.Sprintf("-%s %s", utils.FormatChips(-profit), utils.ChipsEmoji)
+	}
+	finalEmbed.Fields = append(finalEmbed.Fields, &discordgo.MessageEmbedField{Name: plLabel, Value: plVal, Inline: true})
 	finalEmbed.Fields = append(finalEmbed.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: outcome, Inline: false})
 	finalEmbed.Fields = append(finalEmbed.Fields, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", utils.FormatChips(newBalance), utils.ChipsEmoji), Inline: false})
 	if jackpotPayout > 0 {
@@ -396,6 +404,7 @@ func (g *Game) buildEmbed(reels string, winnings int64, xpGain int64, final bool
 
 	color := 0x3498db
 	if mode == "final" {
+		// Use winnings as proxy (profit determined later when fields added)
 		if winnings > 0 {
 			color = 0x2ecc71
 		} else {
@@ -422,17 +431,10 @@ func (g *Game) buildEmbed(reels string, winnings int64, xpGain int64, final bool
 	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753050867/SL_d8ophs.png"}
 
 	if mode == "final" {
-		summary := fmt.Sprintf("Bet: %s %s", utils.FormatChips(g.Bet), utils.ChipsEmoji)
-		if winnings > 0 {
-			summary += fmt.Sprintf(" • Win: %s %s", utils.FormatChips(winnings), utils.ChipsEmoji)
-		}
-		summary += fmt.Sprintf(" • Jackpot: %s %s", utils.FormatChips(jackpotAmount), utils.ChipsEmoji)
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Summary", Value: summary, Inline: false})
-		// Keep Bet field for spin again parsing (hidden in summary otherwise). Inline minimal.
+		// Current Jackpot only
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Current Jackpot", Value: fmt.Sprintf("%s %s", utils.FormatChips(jackpotAmount), utils.ChipsEmoji), Inline: false})
+		// Keep Bet field (required for spin again parsing)
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Bet", Value: fmt.Sprintf("%s %s", utils.FormatChips(g.Bet), utils.ChipsEmoji), Inline: true})
-		if winnings > 0 {
-			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Winnings", Value: fmt.Sprintf("%s %s", utils.FormatChips(winnings), utils.ChipsEmoji), Inline: true})
-		}
 		if xpGain > 0 {
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP", Value: fmt.Sprintf("+%s", utils.FormatChips(xpGain)), Inline: true})
 		}
@@ -443,11 +445,11 @@ func (g *Game) buildEmbed(reels string, winnings int64, xpGain int64, final bool
 
 func (g *Game) animateSpin(final [][]string) {
 	g.Phase = phaseSpinning
-	// Minimal 3-step animation to avoid rate-limit stalls:
-	// 1: all three columns spinning
-	// 2: first column locks
-	// 3: final result locks remaining columns
-	stripLen := 12
+	// Extended animation: columns stop one by one.
+	totalSteps := 15
+	col1Lock := 6
+	col2Lock := 11
+	stripLen := 24
 	strips := make([][]string, 3)
 	for c := 0; c < 3; c++ {
 		col := make([]string, stripLen)
@@ -457,14 +459,24 @@ func (g *Game) animateSpin(final [][]string) {
 		strips[c] = col
 	}
 	idx := []int{0, 0, 0}
-	makeFrame := func(lockCols int) [][]string {
+	makeFrame := func(step int) [][]string {
 		frame := make([][]string, 3)
 		for r := 0; r < 3; r++ {
 			frame[r] = make([]string, 3)
 		}
+		lockCols := 0
+		if step >= col1Lock {
+			lockCols = 1
+		}
+		if step >= col2Lock {
+			lockCols = 2
+		}
+		if step == totalSteps-1 {
+			lockCols = 3
+		}
 		for c := 0; c < 3; c++ {
 			var colSyms []string
-			if c < lockCols { // locked columns show final
+			if c < lockCols {
 				colSyms = []string{final[0][c], final[1][c], final[2][c]}
 			} else {
 				colSyms = []string{strips[c][idx[c]%stripLen], strips[c][(idx[c]+1)%stripLen], strips[c][(idx[c]+2)%stripLen]}
@@ -476,17 +488,15 @@ func (g *Game) animateSpin(final [][]string) {
 		}
 		return frame
 	}
-	// Frame 1
-	for step, lock := range []int{0, 1, 3} { // lock progression
-		frame := makeFrame(lock)
-		reelsTxt := formatReels(frame)
-		embed := g.buildEmbed(reelsTxt, 0, 0, false, 0)
+	for step := 0; step < totalSteps; step++ {
+		frame := makeFrame(step)
+		embed := g.buildEmbed(formatReels(frame), 0, 0, false, 0)
 		embeds := []*discordgo.MessageEmbed{embed}
 		if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds}); err != nil {
-			log.Printf("[slots] anim edit step=%d err=%v", step+1, err)
+			log.Printf("[slots] anim edit step=%d err=%v", step, err)
 		}
-		if lock != 3 {
-			time.Sleep(450 * time.Millisecond)
+		if step < totalSteps-1 {
+			time.Sleep(180 * time.Millisecond)
 		}
 	}
 }
