@@ -209,6 +209,9 @@ func BlackjackGameEmbed(playerHands []HandData, dealerHand []string, dealerValue
 	return embed
 }
 
+// RouletteGameEmbed builds the roulette game embed for different states
+// (Primary RouletteGameEmbed defined later in file)
+
 // GameResultEmbed creates an embed showing game results
 func GameResultEmbed(gameType string, bet, profit int64, userBefore, userAfter *User) *discordgo.MessageEmbed {
 	var title, description string
@@ -462,4 +465,55 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%d days, %d hours", days, hours)
 	}
 	return fmt.Sprintf("%d hours", hours)
+}
+
+// RouletteGameEmbed builds the roulette game embed for different states
+// state: betting | spinning | final
+func RouletteGameEmbed(state string, bets map[string]int64, resultNumber int, resultColor string, profit int64, newBalance int64, xpGain int64) *discordgo.MessageEmbed {
+	title := "🎡 Roulette"
+	var description string
+	color := BotColor
+	switch state {
+	case "betting":
+		description = "Place your bets! Use the buttons below then press Spin."
+		color = 0x1E8449
+	case "spinning":
+		description = "The wheel is spinning... ⏳"
+		color = 0xF1C40F
+	case "final":
+		description = fmt.Sprintf("Result: **%d** (%s)", resultNumber, strings.Title(resultColor))
+		if profit > 0 {
+			description += fmt.Sprintf("\nYou won **%s** %s", FormatChips(profit), ChipsEmoji)
+			color = 0x2ECC71
+		} else if profit < 0 {
+			description += fmt.Sprintf("\nYou lost **%s** %s", FormatChips(-profit), ChipsEmoji)
+			color = 0xE74C3C
+		} else {
+			description += "\nIt's a push."
+			color = 0x95A5A6
+		}
+	}
+	embed := CreateBrandedEmbed(title, description, color)
+	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753042166/3_vxurig.png"}
+	// Bets
+	if len(bets) > 0 {
+		var lines []string
+		var total int64
+		for k, v := range bets {
+			lines = append(lines, fmt.Sprintf("**%s**: %s", strings.ReplaceAll(k, "_", " "), FormatChips(v)))
+			total += v
+		}
+		lines = append(lines, fmt.Sprintf("Total: %s %s", FormatChips(total), ChipsEmoji))
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Current Bets", Value: strings.Join(lines, "\n"), Inline: false})
+	} else if state == "betting" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Current Bets", Value: "No bets placed yet.", Inline: false})
+	}
+	if state == "final" {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", FormatChips(newBalance), ChipsEmoji), Inline: true})
+		if xpGain > 0 {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP Gained", Value: fmt.Sprintf("%s XP", FormatChips(xpGain)), Inline: true})
+		}
+		embed.Footer.Text += " | Game Over"
+	}
+	return embed
 }

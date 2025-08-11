@@ -13,6 +13,7 @@ import (
 	"time"
 
 	blackjack "hrc-go/games/blackjack"
+	roulette "hrc-go/games/roulette"
 	"hrc-go/utils"
 
 	"github.com/bwmarrin/discordgo"
@@ -226,6 +227,7 @@ func registerSlashCommands(s *discordgo.Session) error {
 			Description: "Claim all available bonuses",
 		},
 		blackjack.RegisterBlackjackCommands(),
+		roulette.RegisterRouletteCommand(),
 	}
 
 	for _, command := range commands {
@@ -265,6 +267,8 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		handleClaimAllCommand(s, i)
 	case "blackjack":
 		blackjack.HandleBlackjackCommand(s, i)
+	case "roulette":
+		roulette.HandleRouletteCommand(s, i)
 	}
 }
 
@@ -278,6 +282,10 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Route button interactions to appropriate handlers
 	if strings.HasPrefix(customID, "blackjack_") {
 		blackjack.HandleBlackjackInteraction(s, i)
+	}
+
+	if strings.HasPrefix(customID, "roulette_") {
+		roulette.HandleRouletteInteraction(s, i)
 	}
 }
 

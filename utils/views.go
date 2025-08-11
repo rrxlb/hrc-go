@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"time"
+	"strconv"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -373,4 +374,17 @@ func IsUserAuthorized(i *discordgo.InteractionCreate, authorizedUserID string) b
 // GetComponentTimeout returns the default timeout for interactive components
 func GetComponentTimeout() time.Duration {
 	return 5 * time.Minute // 5 minutes default timeout
+}
+
+// ParseUserID converts a Discord user ID string to int64 (exported for game packages)
+func ParseUserID(id string) (int64, error) { return strconv.ParseInt(id, 10, 64) }
+
+// EditOriginalInteraction edits the original interaction response (slash command message)
+func EditOriginalInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
+	edit := &discordgo.WebhookEdit{
+		Embeds:     &[]*discordgo.MessageEmbed{embed},
+		Components: &components,
+	}
+	_, err := s.InteractionResponseEdit(i.Interaction, edit)
+	return err
 }
