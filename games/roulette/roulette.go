@@ -152,6 +152,10 @@ func (rg *RouletteGame) resolveSpin(s *discordgo.Session) {
 	if profit > 0 {
 		xpGain = profit * utils.XPPerProfit
 	}
+	// Premium gating for XP display
+	if updatedUser != nil && !utils.ShouldShowXPGained(rg.BaseGame.Interaction.Member, updatedUser) {
+		xpGain = 0
+	}
 	rg.State = "final"
 	utils.EditOriginalInteraction(s, rg.BaseGame.Interaction, utils.RouletteGameEmbed("final", rg.Bets, num, color, profit, newBalance, xpGain), nil)
 	delete(activeRouletteGames, rg.UserID)

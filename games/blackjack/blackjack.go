@@ -456,7 +456,14 @@ func (bg *BlackjackGame) createGameEmbed(gameOver bool) *discordgo.MessageEmbed 
 	if gameOver {
 		profit = bg.NetProfit
 	}
-	xpGain := int64(0) // Premium XP feature handled later
+	// Compute premium-gated XP for display
+	xpGain := int64(0)
+	if gameOver && profit > 0 {
+		xpGain = profit * utils.XPPerProfit
+		if bg.BaseGame != nil && bg.BaseGame.UserData != nil && !utils.ShouldShowXPGained(bg.BaseGame.Interaction.Member, bg.BaseGame.UserData) {
+			xpGain = 0
+		}
+	}
 
 	embed := utils.BlackjackGameEmbed(
 		playerHandData,

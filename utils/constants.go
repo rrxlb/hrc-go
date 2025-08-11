@@ -6,7 +6,7 @@ const (
 	HighRollersClubLink       = "https://discord.gg/RK4K8tDsHB"
 	DeveloperRoleID     int64 = 1399860810574073978
 	BotColor                  = 0x5865F2
-	PremiumRoleID       int64 = 1396631093154943026
+	PremiumRoleID       int64 = 1333193975947071488
 )
 
 // Economy & XP

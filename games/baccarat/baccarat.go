@@ -193,6 +193,9 @@ func (g *Game) finishViaComponentUpdate(s *discordgo.Session, i *discordgo.Inter
 	if g.Profit > 0 {
 		xpGain = g.Profit * utils.XPPerProfit
 	}
+	if g.BaseGame != nil && g.BaseGame.UserData != nil && !utils.ShouldShowXPGained(g.BaseGame.Interaction.Member, g.BaseGame.UserData) {
+		xpGain = 0
+	}
 	embed := baccaratResultEmbed(g, updatedUser.Chips, xpGain)
 	components := []discordgo.MessageComponent{utils.CreateActionRow(
 		utils.CreateButton("baccarat_player", "Player", discordgo.SuccessButton, true, nil),
@@ -260,6 +263,9 @@ func baccaratResultEmbed(g *Game, newBalance int64, xpGain int64) *discordgo.Mes
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Result", Value: "Push", Inline: false})
 	}
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", utils.FormatChips(newBalance), utils.ChipsEmoji), Inline: false})
+	if xpGain > 0 {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP Gained", Value: fmt.Sprintf("%s XP", utils.FormatChips(xpGain)), Inline: false})
+	}
 	embed.Footer.Text += " | Game Over"
 	return embed
 }

@@ -284,7 +284,8 @@ func GameResultEmbed(gameType string, bet, profit int64, userBefore, userAfter *
 // (Removed duplicate Rank struct - using the one from constants.go)
 
 // UserProfileEmbed creates an embed for user profile display
-func UserProfileEmbed(user *User, discordUser *discordgo.User) *discordgo.MessageEmbed {
+// showWinLoss controls whether wins/losses/win rate stats are shown (premium feature)
+func UserProfileEmbed(user *User, discordUser *discordgo.User, showWinLoss bool) *discordgo.MessageEmbed {
 	rank := getUserRank(user.TotalXP)
 	nextRank := getNextRank(user.TotalXP)
 
@@ -313,28 +314,33 @@ func UserProfileEmbed(user *User, discordUser *discordgo.User) *discordgo.Messag
 	}
 
 	// Stats
-	totalGames := user.Wins + user.Losses
-	winRate := 0.0
-	if totalGames > 0 {
-		winRate = (float64(user.Wins) / float64(totalGames)) * 100
+	if showWinLoss {
+		totalGames := user.Wins + user.Losses
+		winRate := 0.0
+		if totalGames > 0 {
+			winRate = (float64(user.Wins) / float64(totalGames)) * 100
+		}
+
+		embed.Fields = append(embed.Fields, []*discordgo.MessageEmbedField{
+			{
+				Name:   "Games Won",
+				Value:  strconv.Itoa(user.Wins),
+				Inline: true,
+			},
+			{
+				Name:   "Games Lost",
+				Value:  strconv.Itoa(user.Losses),
+				Inline: true,
+			},
+			{
+				Name:   "Win Rate",
+				Value:  fmt.Sprintf("%.1f%%", winRate),
+				Inline: true,
+			},
+		}...)
 	}
 
 	embed.Fields = append(embed.Fields, []*discordgo.MessageEmbedField{
-		{
-			Name:   "Games Won",
-			Value:  strconv.Itoa(user.Wins),
-			Inline: true,
-		},
-		{
-			Name:   "Games Lost",
-			Value:  strconv.Itoa(user.Losses),
-			Inline: true,
-		},
-		{
-			Name:   "Win Rate",
-			Value:  fmt.Sprintf("%.1f%%", winRate),
-			Inline: true,
-		},
 		{
 			Name:   "Total XP",
 			Value:  FormatNumber(user.TotalXP),

@@ -269,6 +269,11 @@ func handleReveal(s *discordgo.Session, i *discordgo.InteractionCreate, g *Game,
 			newBal = userAfter.Chips
 		}
 
+		// Premium gating: hide XP gained unless allowed
+		if !utils.ShouldShowXPGained(i.Member, userAfter) {
+			xp = 0
+		}
+
 		// Hide grid/components in final state to reduce space
 		comps := []discordgo.MessageComponent{}
 		// Build final embed
@@ -308,6 +313,11 @@ func handleCashout(s *discordgo.Session, i *discordgo.InteractionCreate, g *Game
 	newBal := int64(0)
 	if userAfter != nil {
 		newBal = userAfter.Chips
+	}
+
+	// Premium gating: hide XP gained unless allowed
+	if !utils.ShouldShowXPGained(i.Member, userAfter) {
+		xp = 0
 	}
 
 	// Hide components in final state (compact)

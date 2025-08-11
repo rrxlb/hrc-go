@@ -207,6 +207,9 @@ func (g *Game) play() {
 	if profit > 0 {
 		xpGain = profit * utils.XPPerProfit
 	}
+	if g.BaseGame != nil && g.BaseGame.UserData != nil && !utils.ShouldShowXPGained(g.BaseGame.Interaction.Member, g.BaseGame.UserData) {
+		xpGain = 0
+	}
 	outcome := "No wins this time. Better luck next time!"
 	if totalWinnings > 0 {
 		outcome = fmt.Sprintf("Congratulations! You won %s chips!", utils.FormatChips(totalWinnings))

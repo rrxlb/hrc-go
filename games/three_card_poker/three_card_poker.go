@@ -202,6 +202,9 @@ func (g *TCPGame) finish(s *discordgo.Session, i *discordgo.InteractionCreate, f
 	if profit > 0 {
 		xpGain = profit * utils.XPPerProfit
 	}
+	if g.BaseGame != nil && g.BaseGame.UserData != nil && !utils.ShouldShowXPGained(g.BaseGame.Interaction.Member, g.BaseGame.UserData) {
+		xpGain = 0
+	}
 	embed := utils.ThreeCardPokerEmbed("final", cardsToStrings(g.PlayerHand), cardsToStrings(g.DealerHand), g.PlayerEval.Name, g.DealerEval.Name, g.Bet, g.PairPlusBet, g.PlayBet, outcome, payoutLines, updatedUser.Chips, profit, xpGain)
 	utils.UpdateComponentInteraction(s, i, embed, nil)
 	delete(activeTCPGames, g.UserID)

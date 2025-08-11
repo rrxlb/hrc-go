@@ -234,6 +234,9 @@ func (g *Game) endGame(s *discordgo.Session, i *discordgo.InteractionCreate, los
 	if profit > 0 {
 		xpGain = profit * utils.XPPerProfit
 	}
+	if g.BaseGame != nil && g.BaseGame.UserData != nil && !utils.ShouldShowXPGained(g.BaseGame.Interaction.Member, g.BaseGame.UserData) {
+		xpGain = 0
+	}
 	_ = xpGain
 	// Build final embed
 	embed := g.buildEmbed("final", outcome, profit > 0)
@@ -333,7 +336,12 @@ func (g *Game) buildEmbed(state string, outcomeText string, won bool) *discordgo
 			profit := g.currentWinnings() - g.Bet
 			if profit > 0 {
 				xpGain := profit * utils.XPPerProfit
-				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP Gained", Value: fmt.Sprintf("%s XP", utils.FormatChips(xpGain)), Inline: true})
+				if g.BaseGame != nil && g.BaseGame.UserData != nil && !utils.ShouldShowXPGained(g.BaseGame.Interaction.Member, g.BaseGame.UserData) {
+					xpGain = 0
+				}
+				if xpGain > 0 {
+					embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP Gained", Value: fmt.Sprintf("%s XP", utils.FormatChips(xpGain)), Inline: true})
+				}
 			}
 		}
 		if g.UserData != nil {
