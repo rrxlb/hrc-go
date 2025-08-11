@@ -22,7 +22,7 @@ var (
 		"Bet A Million", "Always Broke", "My Wife's Money", "Sofa King Fast", "Harry Trotter",
 		"Blazing Saddles", "Debt Collector", "Spinning Plates", "Pixelated Steed", "Discord Nitro",
 	}
-	horseEmojis = []string{"🐴", "🐎", "�", "�"}
+	horseEmojis = []string{"🐴", "🐎", "🦄", "🏇"}
 	trackLength = 20
 )
 
@@ -492,9 +492,10 @@ func trackDisplay(horses []*Horse) string {
 		if pos > trackLength-1 {
 			pos = trackLength - 1
 		}
-		progress := strings.Repeat("═", pos)
-		remain := strings.Repeat("─", trackLength-1-pos)
-		rows = append(rows, fmt.Sprintf("`%d.` `[%s%s%s]` %s", h.ID, progress, h.Icon, remain, finish))
+		// ASCII-only inside the code block for consistent alignment; emoji outside
+		progress := strings.Repeat("=", pos)
+		remain := strings.Repeat("-", trackLength-1-pos)
+		rows = append(rows, fmt.Sprintf("`%2d.` %s `[%s>%s]` %s", h.ID, h.Icon, progress, remain, finish))
 	}
 	return strings.Join(rows, "\n")
 }
@@ -600,7 +601,24 @@ func scheduleCleanup(s *discordgo.Session, channelID string, phase RaceStatus) {
 		races.Unlock()
 		return
 	}
-	// Mark cancelled and remove from map
+	// If we're in betting and there are bets, auto-start the race; otherwise cleanup
+	if phase == StatusBetting && len(r.Bets) > 0 {
+		r.Status = StatusRunning
+		msgID := r.MessageID
+		races.Unlock()
+		// Update message to locked & start
+		embed := utils.CreateBrandedEmbed("🏇 Bets are Locked! 🏇", "The bets are in! The race is about to begin...", 0x8E44AD)
+		if msgID != "" {
+			embeds := []*discordgo.MessageEmbed{embed}
+			comps := []discordgo.MessageComponent{}
+			_, _ = s.ChannelMessageEditComplex(&discordgo.MessageEdit{Channel: channelID, ID: msgID, Embeds: &embeds, Components: &comps})
+		}
+		// Run race
+		go runRace(s, r)
+		return
+	}
+
+	// Otherwise, cancel and cleanup
 	r.Status = StatusCancelled
 	delete(races.byChannel, channelID)
 	msgID := r.MessageID
