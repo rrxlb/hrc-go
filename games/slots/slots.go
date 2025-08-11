@@ -423,9 +423,14 @@ func (g *Game) buildEmbed(reels string, winnings int64, xpGain int64, final bool
 
 func (g *Game) animateSpin(final [][]string) {
 	g.Phase = phaseSpinning
-	totalFrames := 18
-	stopCol := []int{10, 14, 18} // column stop frames
-	stripLen := 30
+	// Reduced frames to respect Discord rate limits (<=5 edits/sec)
+	type frameSpec struct {
+		frame int
+		sleep time.Duration
+	}
+	// We simulate spin with 8 updates over ~2.1s then land final
+	specs := []frameSpec{{1, 250 * time.Millisecond}, {2, 250 * time.Millisecond}, {3, 250 * time.Millisecond}, {4, 250 * time.Millisecond}, {5, 250 * time.Millisecond}, {6, 300 * time.Millisecond}, {7, 300 * time.Millisecond}, {8, 350 * time.Millisecond}}
+	stripLen := 20
 	strips := make([][]string, 3)
 	for c := 0; c < 3; c++ {
 		col := make([]string, stripLen)
@@ -435,31 +440,33 @@ func (g *Game) animateSpin(final [][]string) {
 		strips[c] = col
 	}
 	idx := []int{0, 0, 0}
-	for frameN := 1; frameN <= totalFrames; frameN++ {
+	for fi, spec := range specs {
 		frame := make([][]string, 3)
 		for r := 0; r < 3; r++ {
 			frame[r] = make([]string, 3)
 		}
+		// Determine stop progression: gradually lock columns
+		// Columns stop at frames 6,7,8 respectively
 		for c := 0; c < 3; c++ {
-			var symbolsCol []string
-			if frameN < stopCol[c] {
-				symbolsCol = []string{strips[c][(idx[c])%stripLen], strips[c][(idx[c]+1)%stripLen], strips[c][(idx[c]+2)%stripLen]}
+			var colSyms []string
+			stopAt := 6 + c    // 6,7,8
+			if fi+1 < stopAt { // still spinning
+				colSyms = []string{strips[c][idx[c]%stripLen], strips[c][(idx[c]+1)%stripLen], strips[c][(idx[c]+2)%stripLen]}
 				idx[c] = (idx[c] + 1) % stripLen
-			} else {
-				symbolsCol = []string{final[0][c], final[1][c], final[2][c]}
+			} else { // locked
+				colSyms = []string{final[0][c], final[1][c], final[2][c]}
 			}
 			for r := 0; r < 3; r++ {
-				frame[r][c] = symbolsCol[r]
+				frame[r][c] = colSyms[r]
 			}
 		}
 		reelsTxt := formatReels(frame)
 		embed := g.buildEmbed(reelsTxt, 0, 0, false, 0)
 		embeds := []*discordgo.MessageEmbed{embed}
 		if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds}); err != nil {
-			log.Printf("[slots] anim edit frame=%d err=%v", frameN, err)
+			log.Printf("[slots] anim edit frame=%d err=%v", spec.frame, err)
 		}
-		// Fixed per-frame delay for smoother pacing
-		time.Sleep(110 * time.Millisecond)
+		time.Sleep(spec.sleep)
 	}
 }
 

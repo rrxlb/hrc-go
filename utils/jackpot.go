@@ -43,9 +43,9 @@ var JackpotMgr *JackpotManager
 
 // Jackpot configuration constants
 const (
-	DefaultSlotsJackpot     = 100000  // 100k starting jackpot for slots
-	DefaultGeneralJackpot   = 50000   // 50k starting jackpot for general games
-	SlotsContributionRate   = 0.01    // 1% of each slots bet goes to jackpot
+	DefaultSlotsJackpot     = 2500    // 100k starting jackpot for slots
+	DefaultGeneralJackpot   = 2500    // 50k starting jackpot for general games
+	SlotsContributionRate   = 0.10    // 10% of each slots bet goes to jackpot
 	GeneralContributionRate = 0.005   // 0.5% of other game bets goes to jackpot
 	MinimumJackpotAmount    = 10000   // Minimum jackpot before reset
 	JackpotWinThreshold     = 1000000 // Jackpot win probability threshold
@@ -53,17 +53,17 @@ const (
 
 // InitializeJackpotManager sets up the jackpot system
 func InitializeJackpotManager() error {
-	JackpotMgr = &JackpotManager{
-		jackpots: make(map[JackpotType]*Jackpot),
-	}
-
-	// Create jackpots table if it doesn't exist
+	log.Println("[jackpot] InitializeJackpotManager start")
+	JackpotMgr = &JackpotManager{jackpots: make(map[JackpotType]*Jackpot)}
 	if err := JackpotMgr.createJackpotsTable(); err != nil {
 		return fmt.Errorf("failed to create jackpots table: %w", err)
 	}
-
-	// Load existing jackpots or create defaults
-	return JackpotMgr.loadJackpots()
+	if err := JackpotMgr.loadJackpots(); err != nil {
+		log.Printf("[jackpot] loadJackpots error: %v", err)
+		return err
+	}
+	log.Println("[jackpot] InitializeJackpotManager complete")
+	return nil
 }
 
 // createJackpotsTable creates the jackpots table if it doesn't exist
@@ -161,7 +161,12 @@ func (jm *JackpotManager) loadJackpots() error {
 
 	// Save any missing default jackpots
 	if loadedCount == 0 {
-		return jm.saveDefaultJackpots()
+		log.Println("[jackpot] No jackpots found in DB; saving defaults")
+		if err := jm.saveDefaultJackpots(); err != nil {
+			return err
+		}
+		log.Println("[jackpot] Default jackpots saved")
+		return nil
 	}
 
 	log.Printf("Loaded %d jackpots from database", loadedCount)
@@ -202,10 +207,11 @@ func (jm *JackpotManager) initializeDefaultJackpots() {
 // saveDefaultJackpots saves default jackpots to database
 func (jm *JackpotManager) saveDefaultJackpots() error {
 	if DB == nil {
+		log.Println("[jackpot] DB nil; skipping saveDefaultJackpots (running in memory-only mode)")
 		return nil
 	}
-
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 	jm.mutex.RLock()
 	defer jm.mutex.RUnlock()
 
@@ -220,6 +226,9 @@ func (jm *JackpotManager) saveDefaultJackpots() error {
 				updated_at = EXCLUDED.updated_at
 			RETURNING id`
 
+		if ctx.Err() != nil {
+			return fmt.Errorf("context expired before insert: %w", ctx.Err())
+		}
 		err := DB.QueryRow(ctx, query,
 			string(jackpot.Type),
 			jackpot.Amount,
@@ -233,7 +242,7 @@ func (jm *JackpotManager) saveDefaultJackpots() error {
 		}
 	}
 
-	log.Printf("Saved %d default jackpots to database", len(jm.jackpots))
+	log.Printf("[jackpot] Saved %d default jackpots to database", len(jm.jackpots))
 	return nil
 }
 
@@ -263,7 +272,7 @@ func (jm *JackpotManager) ContributeToJackpot(jackpotType JackpotType, betAmount
 		}
 	}
 
-	log.Printf("Added %d chips to %s jackpot (bet: %d, rate: %.4f). New total: %d",
+	log.Printf("[jackpot] Added %d chips to %s jackpot (bet: %d, rate: %.4f). New total: %d",
 		contribution, jackpotType, betAmount, jackpot.ContributionRate, jackpot.Amount)
 
 	return contribution, nil
@@ -274,8 +283,8 @@ func (jm *JackpotManager) updateJackpotInDB(jackpot *Jackpot) error {
 	if DB == nil {
 		return nil
 	}
-
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	query := `
 		UPDATE jackpots 
 		SET amount = $1, last_winner = $2, last_win_amount = $3, 
@@ -438,7 +447,7 @@ func (jm *JackpotManager) AddJackpotAmount(jackpotType JackpotType, amount int64
 		}
 	}
 
-	log.Printf("Added %d chips to %s jackpot. New total: %d", amount, jackpotType, jackpot.Amount)
+	log.Printf("[jackpot] Added %d chips to %s jackpot. New total: %d", amount, jackpotType, jackpot.Amount)
 	return nil
 }
 
