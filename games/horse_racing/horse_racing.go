@@ -131,6 +131,7 @@ func pickHorses(n int) []*Horse {
 	horses := make([]*Horse, 0, n)
 	for i, j := range idx {
 		name := horseNames[j]
+		// Randomly choose an emoji; allow duplicates like Python to keep variety
 		icon := horseEmojis[r.Intn(len(horseEmojis))]
 		// Assign odds between 2 and 25 to match Python
 		odds := 2 + r.Intn(24)
@@ -508,10 +509,10 @@ func trackDisplay(horses []*Horse) string {
 		if pos > trackLength-1 {
 			pos = trackLength - 1
 		}
-		// ASCII-only inside the code block for consistent alignment; emoji outside
-		progress := strings.Repeat("=", pos)
-		remain := strings.Repeat("-", trackLength-1-pos)
-		rows = append(rows, fmt.Sprintf("`%2d.` %s `[%s>%s]` %s", h.ID, h.Icon, progress, remain, finish))
+		// Use box-drawing characters with the horse icon inside the code block for visible movement
+		progress := strings.Repeat("═", pos)
+		remain := strings.Repeat("─", trackLength-1-pos)
+		rows = append(rows, fmt.Sprintf("`%2d.` `[%s%s%s]` %s", h.ID, progress, h.Icon, remain, finish))
 	}
 	return strings.Join(rows, "\n")
 }
