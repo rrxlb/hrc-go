@@ -72,7 +72,8 @@ func (jm *JackpotManager) createJackpotsTable() error {
 		return nil // Skip in offline mode
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 	query := `
 		CREATE TABLE IF NOT EXISTS jackpots (
 			id SERIAL PRIMARY KEY,
@@ -86,8 +87,12 @@ func (jm *JackpotManager) createJackpotsTable() error {
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		)`
 
+	log.Println("[jackpot] Creating jackpots table (timeout 3s)...")
 	_, err := DB.Exec(ctx, query)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("timeout creating jackpots table: %w", err)
+		}
 		return fmt.Errorf("failed to create jackpots table: %w", err)
 	}
 
@@ -104,14 +109,19 @@ func (jm *JackpotManager) loadJackpots() error {
 		return nil // Skip database loading in offline mode
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 	query := `
 		SELECT id, type, amount, seed_amount, contribution_rate, 
 		       last_winner, last_win_amount, last_win_time, updated_at
 		FROM jackpots`
 
+	log.Println("[jackpot] Loading jackpots from database (timeout 3s)...")
 	rows, err := DB.Query(ctx, query)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("timeout querying jackpots: %w", err)
+		}
 		// If no jackpots exist, save defaults to database
 		if err == pgx.ErrNoRows {
 			return jm.saveDefaultJackpots()

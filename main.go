@@ -1,8 +1,10 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,6 +26,8 @@ var readyCh = make(chan struct{}, 1)
 func main() {
 	// Start HTTP server for Railway health checks
 	go startHealthServer()
+
+	log.Println("[startup] Main initialization sequence starting...")
 
 	// Initialize database
 	if err := utils.SetupDatabase(); err != nil {
@@ -49,19 +53,42 @@ func main() {
 	}
 
 	// Initialize jackpot system
-	if err := utils.InitializeJackpotManager(); err != nil {
-		log.Printf("Jackpot manager initialization failed: %v", err)
-		log.Println("Bot will continue without jackpot features")
-	} else {
-		log.Println("Jackpot system initialized")
+	jackpotInitCh := make(chan error, 1)
+	log.Println("[startup] Beginning jackpot manager initialization (async)...")
+	go func() {
+		jackpotInitCh <- utils.InitializeJackpotManager()
+	}()
+
+	select {
+	case err := <-jackpotInitCh:
+		if err != nil {
+			log.Printf("Jackpot manager initialization failed: %v", err)
+			log.Println("Bot will continue without jackpot features")
+		} else {
+			log.Println("Jackpot system initialized (async)")
+		}
+	case <-time.After(5 * time.Second):
+		log.Println("[warn] Jackpot manager initialization taking longer than 5s; continuing startup. Will log result when complete.")
+		go func() { // log late result
+			if err := <-jackpotInitCh; err != nil {
+				log.Printf("[late] Jackpot manager initialized with error after delay: %v", err)
+			} else {
+				log.Println("[late] Jackpot manager initialized successfully after delay")
+			}
+		}()
 	}
 
 	// (Game manager initialization removed; legacy interface cleanup)
 
 	// Get bot token from environment (support multiple common var names)
-	token := strings.TrimSpace(os.Getenv("BOT_TOKEN"))
-	if token == "" {
-		token = strings.TrimSpace(os.Getenv("DISCORD_TOKEN"))
+	var token string
+	for _, key := range []string{"BOT_TOKEN", "DISCORD_TOKEN", "DISCORD_BOT_TOKEN", "HRC_BOT_TOKEN"} {
+		val := strings.TrimSpace(os.Getenv(key))
+		if val != "" {
+			log.Printf("[startup] Using token from env var %s", key)
+			token = val
+			break
+		}
 	}
 	if token == "" {
 		log.Println("[startup] No BOT_TOKEN or DISCORD_TOKEN environment variable found – bot will not connect. Set BOT_TOKEN.")
@@ -84,6 +111,14 @@ func main() {
 		return t[:4] + "..." + t[len(t)-4:]
 	}(token)
 	log.Printf("[startup] Retrieved bot token (masked): %s | segments=%d", masked, len(parts))
+
+	// Preflight network connectivity to Discord
+	log.Println("[net] Starting Discord connectivity preflight (tcp + tls)...")
+	if err := testDiscordConnectivity(); err != nil {
+		log.Printf("[warn] Discord connectivity preflight failed: %v", err)
+	} else {
+		log.Println("[net] Discord connectivity preflight succeeded")
+	}
 
 	// Create Discord session
 	var err error
@@ -126,6 +161,15 @@ func main() {
 	log.Println("Bot is now running. Press CTRL+C to exit.")
 	botStatus = "running"
 
+	// Heartbeat diagnostic goroutine
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			log.Printf("[heartbeat] status=%s", botStatus)
+		}
+	}()
+
 	// Wait for interrupt signal
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
@@ -133,6 +177,30 @@ func main() {
 
 	log.Println("Gracefully shutting down...")
 	botStatus = "shutting_down"
+}
+
+// testDiscordConnectivity performs a lightweight TCP + TLS dial to Discord API host
+func testDiscordConnectivity() error {
+	// Primary REST API host
+	apiHost := "discord.com:443"
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", apiHost, 3*time.Second)
+	if err != nil {
+		return fmt.Errorf("tcp dial failed: %w", err)
+	}
+	defer conn.Close()
+	durTCP := time.Since(start)
+
+	// Upgrade to TLS to ensure handshake works
+	startTLS := time.Now()
+	client := tls.Client(conn, &tls.Config{ServerName: "discord.com"})
+	if err := client.Handshake(); err != nil {
+		return fmt.Errorf("tls handshake failed: %w", err)
+	}
+	durTLS := time.Since(startTLS)
+
+	log.Printf("[net] Preflight TCP ok (%.0fms), TLS ok (%.0fms)", durTCP.Seconds()*1000, durTLS.Seconds()*1000)
+	return nil
 }
 
 func onReady(s *discordgo.Session, event *discordgo.Ready) {
