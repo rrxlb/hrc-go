@@ -503,12 +503,11 @@ func (g *Game) components() []discordgo.MessageComponent {
 	if g.BaseGame.IsGameOver() {
 		return []discordgo.MessageComponent{}
 	}
-	if g.TimedOut {
+	if g.TimedOut && !g.AutoClosed {
 		return []discordgo.MessageComponent{utils.CreateActionRow(
 			utils.CreateButton("craps_resume", "Resume", discordgo.SuccessButton, false, nil),
 		)}
 	}
-	// Primary row: Roll, Add Field, Add Come/Pass etc.
 	row1 := utils.CreateActionRow(
 		utils.CreateButton("craps_roll", "Roll", discordgo.SuccessButton, false, &discordgo.ComponentEmoji{Name: "🎲"}),
 		utils.CreateButton("craps_bet_field", "Field", discordgo.PrimaryButton, false, nil),
@@ -576,18 +575,21 @@ func (g *Game) layoutString() string {
 	nums := []int{4, 5, 6, 8, 9, 10}
 	top := make([]string, 0, len(nums))
 	for _, n := range nums {
-		mark := ""
+		markers := []string{}
 		if g.Point != nil && *g.Point == n {
-			mark += "*"
+			markers = append(markers, "POINT")
 		}
 		if _, ok := g.Bets[fmt.Sprintf("place_%d", n)]; ok {
-			mark += "P"
+			markers = append(markers, "PL")
 		}
-		if mark == "" {
+		if cpAmt, ok := g.ComePoints[n]; ok {
+			markers = append(markers, "C"+shortChips(cpAmt))
+		}
+		if len(markers) == 0 {
 			top = append(top, fmt.Sprintf("[%d]", n))
 			continue
 		}
-		top = append(top, fmt.Sprintf("[%d%s]", n, mark))
+		top = append(top, fmt.Sprintf("[%d %s]", n, strings.Join(markers, ":")))
 	}
 	line := strings.Repeat("─", 58)
 	withAmt := func(key, label string) string {
@@ -630,6 +632,23 @@ func (g *Game) layoutString() string {
 		sections = append(sections, strings.Join(hardParts, " | "))
 	}
 	return "`" + strings.Join(sections, "\n") + "`"
+}
+
+// shortChips returns a compact chip amount representation (e.g. 1500 -> 1.5k)
+func shortChips(v int64) string {
+	if v >= 1_000_000 {
+		if v%1_000_000 == 0 {
+			return fmt.Sprintf("%dm", v/1_000_000)
+		}
+		return fmt.Sprintf("%.1fm", float64(v)/1_000_000)
+	}
+	if v >= 1_000 {
+		if v%1_000 == 0 {
+			return fmt.Sprintf("%dk", v/1_000)
+		}
+		return fmt.Sprintf("%.1fk", float64(v)/1_000)
+	}
+	return fmt.Sprintf("%d", v)
 }
 
 // Utility helpers
