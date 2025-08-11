@@ -52,9 +52,9 @@ func (rg *RouletteGame) buildComponents() []discordgo.MessageComponent {
 		return nil
 	}
 	row1 := []discordgo.MessageComponent{
-		// Even-money bets now open a modal to specify wager amount
-		utils.CreateButton("roulette_bet_red", "Red", discordgo.PrimaryButton, false, &discordgo.ComponentEmoji{Name: "🟥"}),
-		utils.CreateButton("roulette_bet_black", "Black", discordgo.PrimaryButton, false, &discordgo.ComponentEmoji{Name: "⬛"}),
+		// Even-money bets now open a modal to specify wager amount (distinct styles)
+		utils.CreateButton("roulette_bet_red", "Red", discordgo.DangerButton, false, &discordgo.ComponentEmoji{Name: "🟥"}),
+		utils.CreateButton("roulette_bet_black", "Black", discordgo.SecondaryButton, false, &discordgo.ComponentEmoji{Name: "⬛"}),
 		utils.CreateButton("roulette_bet_odd", "Odd", discordgo.SecondaryButton, false, nil),
 		utils.CreateButton("roulette_bet_even", "Even", discordgo.SecondaryButton, false, nil),
 		// Removed invalid '#' emoji (caused BUTTON_COMPONENT_INVALID_EMOJI); leaving without emoji

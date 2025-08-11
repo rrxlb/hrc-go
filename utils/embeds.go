@@ -500,7 +500,16 @@ func RouletteGameEmbed(state string, bets map[string]int64, resultNumber int, re
 		var lines []string
 		var total int64
 		for k, v := range bets {
-			lines = append(lines, fmt.Sprintf("**%s**: %s", strings.ReplaceAll(k, "_", " "), FormatChips(v)))
+			name := strings.ReplaceAll(k, "_", " ")
+			// Normalize casing: split words and title case each
+			parts := strings.Split(name, " ")
+			for i, p := range parts {
+				if len(p) > 0 {
+					parts[i] = strings.ToUpper(p[:1]) + p[1:]
+				}
+			}
+			name = strings.Join(parts, " ")
+			lines = append(lines, fmt.Sprintf("**%s**: %s", name, FormatChips(v)))
 			total += v
 		}
 		lines = append(lines, fmt.Sprintf("Total: %s %s", FormatChips(total), ChipsEmoji))
