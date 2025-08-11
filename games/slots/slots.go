@@ -2,6 +2,7 @@ package slots
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
 	"strings"
 	"time"
@@ -93,8 +94,13 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, adjusted)
 	}
 
-	utils.DeferInteractionResponse(s, i, false)
-	go game.play()
+	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
+		log.Printf("[slots] failed to defer interaction: %v", err)
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", "Internal error deferring interaction.", 0xFF0000), nil, true)
+		return
+	}
+	// Run synchronously so total time (~2.2s animation) still within Discord 15m followup window
+	game.play()
 }
 
 // normalize bet to multiple of paylines
@@ -117,6 +123,14 @@ func normalizeBetForPaylines(bet, balance int64) (int64, string) {
 }
 
 func (g *Game) play() {
+	// Capture pre-game rank for rank-up detection
+	beforeRank := getRankForXP(func() int64 {
+		if g.BaseGame.UserData != nil {
+			return g.BaseGame.UserData.TotalXP
+		}
+		return 0
+	}())
+
 	embed := g.buildEmbed("", 0, 0, false, 0)
 	msg, err := g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Embeds: []*discordgo.MessageEmbed{embed}})
 	if err != nil {
@@ -162,6 +176,7 @@ func (g *Game) play() {
 	g.Phase = phaseFinal
 	finalEmbed := g.buildEmbed(formatReels(g.Reels), totalWinnings, xpGain, true, jackpotAmount)
 	finalEmbed.Fields = append(finalEmbed.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: outcome, Inline: false})
+	// Outcome already added inside buildEmbed ordering; append New Balance at end
 	finalEmbed.Fields = append(finalEmbed.Fields, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", utils.FormatChips(updatedUser.Chips), utils.ChipsEmoji), Inline: false})
 	components := []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{utils.CreateButton("slots_spin_again_"+g.MessageID, "Spin Again", discordgo.SuccessButton, false, nil)}}}
 	// Edit followup message (not original interaction)
@@ -169,6 +184,12 @@ func (g *Game) play() {
 	g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds, Components: &components})
 	if g.BetNote != "" {
 		g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Content: g.BetNote, Flags: discordgo.MessageFlagsEphemeral})
+	}
+
+	// Rank-up ephemeral notice
+	afterRank := getRankForXP(updatedUser.TotalXP)
+	if beforeRank.Name != "" && afterRank.Name != "" && afterRank.Name != beforeRank.Name {
+		g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Embeds: []*discordgo.MessageEmbed{utils.CreateBrandedEmbed("🎊 Rank Up!", fmt.Sprintf("%s %s → %s %s", beforeRank.Icon, beforeRank.Name, afterRank.Icon, afterRank.Name), 0xFFD700)}, Flags: discordgo.MessageFlagsEphemeral})
 	}
 }
 
@@ -230,35 +251,65 @@ func (g *Game) calculateResults() (int64, bool) {
 	return total, jackpot
 }
 
-// buildEmbed constructs embed per current phase (light parity; refine after)
-func (g *Game) buildEmbed(reels string, winnings int64, xpGain int64, final bool, jackpotAmount int64) *discordgo.MessageEmbed {
-	color := 0x1E5631
-	if final {
-		if winnings > 0 {
-			color = 0xFFD700
-		} else {
-			color = 0xFF0000
+// getRankForXP replicates internal rank lookup (since utils does not export a helper)
+func getRankForXP(xp int64) utils.Rank {
+	var current utils.Rank
+	for i := 0; i < len(utils.Ranks); i++ { // map iteration order not guaranteed; gather sequentially
+		if rank, ok := utils.Ranks[i]; ok {
+			if xp >= int64(rank.XPRequired) {
+				current = rank
+			} else {
+				break
+			}
 		}
 	}
-	title := "🎰 Slots"
-	desc := "Spinning the reels..."
+	return current
+}
+
+// buildEmbed constructs embed with parity to Python create_slots_embed
+func (g *Game) buildEmbed(reels string, winnings int64, xpGain int64, final bool, jackpotAmount int64) *discordgo.MessageEmbed {
+	var title, description string
+	var color int
+
+	if !final {
+		if reels == "" { // initial
+			title = "Slot Machine"
+			description = "Spinning the reels..."
+			color = 0x3498db // blue
+		} else { // spinning frame
+			title = "Slot Machine"
+			description = fmt.Sprintf("Spinning the reels...\n\n%s", reels)
+			color = 0x3498db
+		}
+	} else { // final
+		title = "Slot Machine Results"
+		description = reels
+		if winnings > 0 {
+			color = 0x2ecc71 // green for win
+		} else {
+			color = 0xe74c3c // red for loss
+		}
+	}
+
+	embed := utils.CreateBrandedEmbed(title, description, color)
+	// Thumbnail parity (slots icon)
+	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753050867/SL_d8ophs.png"}
+
 	if final {
-		desc = "Final Results"
-	}
-	embed := utils.CreateBrandedEmbed(title, desc, color)
-	if reels != "" {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Reels", Value: fmt.Sprintf("``%s``", reels), Inline: false})
-	}
-	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Bet", Value: fmt.Sprintf("%s %s", utils.FormatChips(g.Bet), utils.ChipsEmoji), Inline: true})
-	if final && winnings > 0 {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Winnings", Value: fmt.Sprintf("%s %s", utils.FormatChips(winnings), utils.ChipsEmoji), Inline: true})
-	}
-	if final && xpGain > 0 {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP Gained", Value: utils.FormatChips(xpGain) + " XP", Inline: true})
-	}
-	if jackpotAmount > 0 {
+		// Spacer field
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "\u200b", Value: "\u200b", Inline: false})
+		// Outcome is added externally by caller (play) after winnings computed; ensure placeholder if missing
+		// Jackpot field (always show current amount for visibility)
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Jackpot", Value: fmt.Sprintf("%s %s", utils.FormatChips(jackpotAmount), utils.ChipsEmoji), Inline: true})
+		if winnings > 0 {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Winnings", Value: fmt.Sprintf("%s %s", utils.FormatChips(winnings), utils.ChipsEmoji), Inline: true})
+			if xpGain > 0 { // XP gating (premium display) simplified: always show
+				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP Gained", Value: fmt.Sprintf("+%s XP", utils.FormatChips(xpGain)), Inline: true})
+			}
+		}
+		embed.Footer = &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("You bet %s chips.", utils.FormatChips(g.Bet))}
 	}
+
 	return embed
 }
 
