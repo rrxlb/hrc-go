@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ type BlackjackGame struct {
 	CurrentHand         int
 	InsuranceBet        int64
 	Results             []GameResult
+	NetProfit           int64
 	View                *utils.BlackjackView
 	OriginalInteraction *discordgo.InteractionCreate
 }
@@ -73,7 +75,7 @@ func (bg *BlackjackGame) StartGame() error {
 	playerValue := bg.PlayerHands[0].GetValue()
 	dealerUpCard := bg.DealerHand.Cards[0]
 
-	// Update view options
+	// Update view options (include insurance availability check before potential early finish)
 	bg.updateViewOptions()
 
 	if playerValue == 21 {
@@ -81,10 +83,10 @@ func (bg *BlackjackGame) StartGame() error {
 		return bg.finishGame()
 	}
 
-	// Check if dealer has potential blackjack
-	if dealerUpCard.IsAce() || dealerUpCard.IsTen() {
-		// In a full implementation, you might offer insurance here
-		// For now, just continue with normal play
+	// Check if dealer shows Ace to allow insurance
+	if dealerUpCard.IsAce() {
+		bg.View.CanInsure = true
+		bg.updateViewOptions() // re-evaluate with insurance available
 	}
 
 	// Send initial game state
@@ -174,6 +176,42 @@ func (bg *BlackjackGame) HandleSplit() error {
 	return bg.updateGameState()
 }
 
+// HandleInsurance handles taking insurance when dealer shows an Ace
+func (bg *BlackjackGame) HandleInsurance() error {
+	if bg.IsGameOver() {
+		return fmt.Errorf("game is already over")
+	}
+	// Already took insurance
+	if bg.InsuranceBet > 0 {
+		return fmt.Errorf("insurance already taken")
+	}
+	// Conditions: dealer upcard is Ace and current hand has exactly 2 cards
+	if len(bg.DealerHand.Cards) == 0 || !bg.DealerHand.Cards[0].IsAce() {
+		return fmt.Errorf("insurance not available")
+	}
+	currentHand := bg.PlayerHands[bg.CurrentHand]
+	if currentHand.Size() != 2 {
+		return fmt.Errorf("insurance only available on first two cards")
+	}
+	// Cost is half of original bet for this hand (integer division)
+	cost := bg.Bets[bg.CurrentHand] / 2
+	if cost <= 0 {
+		return fmt.Errorf("invalid insurance cost")
+	}
+	// Ensure user can afford (total committed + cost <= chips)
+	totalCommitted := int64(0)
+	for _, b := range bg.Bets {
+		totalCommitted += b
+	}
+	if bg.UserData.Chips < totalCommitted+cost {
+		return fmt.Errorf("insufficient chips for insurance")
+	}
+	bg.InsuranceBet = cost
+	// Disable insurance button after taking
+	bg.View.CanInsure = false
+	return bg.updateGameState()
+}
+
 // standCurrentHand moves to the next hand or finishes the game
 func (bg *BlackjackGame) standCurrentHand() error {
 	bg.CurrentHand++
@@ -201,8 +239,22 @@ func (bg *BlackjackGame) finishGame() error {
 		bg.Results = append(bg.Results, result)
 
 		payout := int64(float64(bg.Bets[i]) * result.Payout)
-		totalProfit += payout - bg.Bets[i] // Subtract original bet
+		totalProfit += payout - bg.Bets[i] // profit component
 	}
+
+	// Insurance resolution (Python parity): pays 2:1 if dealer blackjack; otherwise lost
+	if bg.InsuranceBet > 0 {
+		if bg.DealerHand.IsBlackjack() {
+			payout := bg.InsuranceBet * 2
+			totalProfit += payout
+			bg.Results = append(bg.Results, GameResult{HandIndex: -1, Result: fmt.Sprintf("Insurance pays out %d!", payout), Payout: 0})
+		} else {
+			totalProfit -= bg.InsuranceBet
+			bg.Results = append(bg.Results, GameResult{HandIndex: -1, Result: "Insurance lost.", Payout: 0})
+		}
+	}
+
+	bg.NetProfit = totalProfit
 
 	// End the base game
 	updatedUser, err := bg.EndGame(totalProfit)
@@ -265,69 +317,36 @@ func (bg *BlackjackGame) calculateHandResult(hand *utils.Hand, handIndex int) Ga
 	playerValue := hand.GetValue()
 	dealerValue := bg.DealerHand.GetValue()
 
-	// Check for player bust
+	// Player bust
 	if hand.IsBust() {
-		return GameResult{
-			HandIndex: handIndex,
-			Result:    "Bust",
-			Payout:    0.0,
-		}
+		return GameResult{HandIndex: handIndex, Result: "Bust! You lost.", Payout: 0.0}
 	}
-
-	// Check for five card charlie
+	// Five Card Charlie
 	if hand.IsFiveCardCharlie() {
-		return GameResult{
-			HandIndex: handIndex,
-			Result:    "Five Card Charlie",
-			Payout:    1.0 + utils.FiveCardCharliePayout,
-		}
+		return GameResult{HandIndex: handIndex, Result: "5-Card Charlie! You win!", Payout: 1.0 + utils.FiveCardCharliePayout}
 	}
-
-	// Check for blackjack
+	// Player blackjack scenarios
 	if hand.IsBlackjack() {
 		if bg.DealerHand.IsBlackjack() {
-			return GameResult{
-				HandIndex: handIndex,
-				Result:    "Push (Both Blackjack)",
-				Payout:    1.0, // Return bet
-			}
+			return GameResult{HandIndex: handIndex, Result: "Push.", Payout: 1.0}
 		}
-		return GameResult{
-			HandIndex: handIndex,
-			Result:    "Blackjack",
-			Payout:    1.0 + utils.BlackjackPayout,
-		}
+		return GameResult{HandIndex: handIndex, Result: "Blackjack! You win!", Payout: 1.0 + utils.BlackjackPayout}
 	}
-
-	// Check for dealer bust
+	// Dealer bust
 	if bg.DealerHand.IsBust() {
-		return GameResult{
-			HandIndex: handIndex,
-			Result:    "Win (Dealer Bust)",
-			Payout:    2.0, // Return bet + winnings
-		}
+		return GameResult{HandIndex: handIndex, Result: "Dealer busts! You win!", Payout: 2.0}
 	}
-
 	// Compare values
 	if playerValue > dealerValue {
-		return GameResult{
-			HandIndex: handIndex,
-			Result:    "Win",
-			Payout:    2.0,
-		}
-	} else if playerValue < dealerValue {
-		return GameResult{
-			HandIndex: handIndex,
-			Result:    "Loss",
-			Payout:    0.0,
-		}
-	} else {
-		return GameResult{
-			HandIndex: handIndex,
-			Result:    "Push",
-			Payout:    1.0, // Return bet
-		}
+		return GameResult{HandIndex: handIndex, Result: "You win!", Payout: 2.0}
 	}
+	if playerValue < dealerValue {
+		if bg.DealerHand.IsBlackjack() {
+			return GameResult{HandIndex: handIndex, Result: "Dealer has Blackjack. You lose.", Payout: 0.0}
+		}
+		return GameResult{HandIndex: handIndex, Result: "Dealer wins.", Payout: 0.0}
+	}
+	return GameResult{HandIndex: handIndex, Result: "Push.", Payout: 1.0}
 }
 
 // updateViewOptions updates the available actions based on game state
@@ -337,6 +356,7 @@ func (bg *BlackjackGame) updateViewOptions() {
 		bg.View.CanStand = false
 		bg.View.CanDouble = false
 		bg.View.CanSplit = false
+		bg.View.CanInsure = false
 		return
 	}
 
@@ -346,11 +366,24 @@ func (bg *BlackjackGame) updateViewOptions() {
 	bg.View.CanHit = !currentHand.IsBust()
 	bg.View.CanStand = true
 
-	// Double down: only on first two cards and if player has enough chips
-	bg.View.CanDouble = currentHand.Size() == 2 && bg.UserData.Chips >= bg.Bets[bg.CurrentHand]
+	// Double down: only on first two cards and if player can afford doubling that specific hand
+	bg.View.CanDouble = currentHand.Size() == 2 && bg.UserData.Chips >= (bg.Bets[bg.CurrentHand])
 
-	// Split: only on first two cards of same rank/value and if player has enough chips
-	bg.View.CanSplit = currentHand.CanSplit() && bg.UserData.Chips >= bg.Bets[bg.CurrentHand]
+	// Split: only on first two cards of same rank and only if still single original hand
+	bg.View.CanSplit = currentHand.CanSplit() && len(bg.PlayerHands) == 1 && bg.UserData.Chips >= bg.Bets[bg.CurrentHand]
+
+	// Insurance: dealer shows Ace, first hand only, first two cards, insurance not already taken
+	if bg.InsuranceBet == 0 && len(bg.DealerHand.Cards) > 0 && bg.DealerHand.Cards[0].IsAce() && currentHand.Size() == 2 {
+		// ensure user can afford half bet in addition to current committed bets
+		cost := bg.Bets[bg.CurrentHand] / 2
+		totalCommitted := int64(0)
+		for _, b := range bg.Bets {
+			totalCommitted += b
+		}
+		bg.View.CanInsure = cost > 0 && bg.UserData.Chips >= (totalCommitted+cost)
+	} else {
+		bg.View.CanInsure = false
+	}
 }
 
 // updateGameState updates the game state display
@@ -401,23 +434,29 @@ func (bg *BlackjackGame) createGameEmbed(gameOver bool) *discordgo.MessageEmbed 
 		totalBet += b
 	}
 
-	// Outcome aggregation if game over
+	// Outcome aggregation (Python parity)
 	outcomeText := ""
-	profit := int64(0)
-	xpGain := int64(0)
 	if gameOver && len(bg.Results) > 0 {
-		var totalPayout int64
+		lines := []string{}
+		multi := len(bg.PlayerHands) > 1
 		for _, r := range bg.Results {
-			payout := int64(float64(bg.Bets[r.HandIndex]) * r.Payout)
-			totalPayout += payout
-			if len(bg.Results) > 1 {
-				outcomeText += fmt.Sprintf("Hand %d: %s (%s %s)\n", r.HandIndex+1, r.Result, utils.FormatChips(payout), utils.ChipsEmoji)
+			if r.HandIndex >= 0 {
+				if multi {
+					lines = append(lines, fmt.Sprintf("Hand %d: %s", r.HandIndex+1, r.Result))
+				} else {
+					lines = append(lines, r.Result)
+				}
 			} else {
-				outcomeText = fmt.Sprintf("%s (%s %s)", r.Result, utils.FormatChips(payout), utils.ChipsEmoji)
+				lines = append(lines, r.Result)
 			}
 		}
-		profit = totalPayout - totalBet
+		outcomeText = strings.TrimSpace(strings.Join(lines, "\n"))
 	}
+	profit := int64(0)
+	if gameOver {
+		profit = bg.NetProfit
+	}
+	xpGain := int64(0) // Premium XP feature handled later
 
 	embed := utils.BlackjackGameEmbed(
 		playerHandData,
@@ -436,19 +475,7 @@ func (bg *BlackjackGame) createGameEmbed(gameOver bool) *discordgo.MessageEmbed 
 }
 
 // Helper functions
-func getProfitPrefix(profit int64) string {
-	if profit > 0 {
-		return "+"
-	}
-	return ""
-}
-
-func abs(n int64) int64 {
-	if n < 0 {
-		return -n
-	}
-	return n
-}
+// (Removed unused helper functions getProfitPrefix/abs; using utils equivalents in embeds)
 
 // HandleBlackjackCommand handles the /blackjack slash command
 func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -556,6 +583,8 @@ func HandleBlackjackInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		actionErr = game.HandleDouble()
 	case "blackjack_split":
 		actionErr = game.HandleSplit()
+	case "blackjack_insurance":
+		actionErr = game.HandleInsurance()
 	default:
 		respondWithError(s, i, "Unknown blackjack action")
 		return
