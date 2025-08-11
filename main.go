@@ -20,6 +20,7 @@ import (
 	craps "hrc-go/games/craps"
 	higherorlower "hrc-go/games/higher_or_lower"
 	horseracing "hrc-go/games/horse_racing"
+	mines "hrc-go/games/mines"
 	roulette "hrc-go/games/roulette"
 	slots "hrc-go/games/slots"
 	threecardpoker "hrc-go/games/three_card_poker"
@@ -174,6 +175,8 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 		} else {
 			log.Printf("Slash commands ready in %dms", time.Since(start).Milliseconds())
 		}
+		// Start background cleanup loops (mines)
+		mines.StartCleanupLoop(s)
 		// Lazy init heavy systems
 		if err := utils.InitializeAchievementManager(); err != nil {
 			log.Printf("Achievement manager init failed (lazy): %v", err)
@@ -231,6 +234,7 @@ func registerSlashCommands(s *discordgo.Session) error {
 		craps.RegisterCrapsCommand(),
 		slots.RegisterSlotsCommand(),
 		horseracing.RegisterHorseRacingCommand(),
+		mines.RegisterMinesCommand(),
 		higherorlower.RegisterHigherOrLowerCommand(),
 		roulette.RegisterRouletteCommand(),
 		threecardpoker.RegisterThreeCardPokerCommand(),
@@ -297,6 +301,8 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			slots.HandleSlotsCommand(s, i)
 		case "derby":
 			horseracing.HandleHorseRacingCommand(s, i)
+		case "mines":
+			mines.HandleMinesCommand(s, i)
 		case "horl":
 			higherorlower.HandleHigherOrLowerCommand(s, i)
 		case "roulette":
@@ -362,6 +368,10 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	if strings.HasPrefix(customID, "derby_") {
 		horseracing.HandleHorseRacingInteraction(s, i)
+	}
+
+	if strings.HasPrefix(customID, "mines_") {
+		mines.HandleMinesButton(s, i)
 	}
 }
 
