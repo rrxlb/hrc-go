@@ -58,14 +58,32 @@ func main() {
 
 	// (Game manager initialization removed; legacy interface cleanup)
 
-	// Get bot token from environment
-	token := os.Getenv("BOT_TOKEN")
+	// Get bot token from environment (support multiple common var names)
+	token := strings.TrimSpace(os.Getenv("BOT_TOKEN"))
 	if token == "" {
-		log.Println("BOT_TOKEN not set - Discord bot will not connect")
+		token = strings.TrimSpace(os.Getenv("DISCORD_TOKEN"))
+	}
+	if token == "" {
+		log.Println("[startup] No BOT_TOKEN or DISCORD_TOKEN environment variable found – bot will not connect. Set BOT_TOKEN.")
 		botStatus = "no_token"
-		// Keep HTTP server running
 		select {}
 	}
+
+	// Basic sanity check (Discord bot tokens have three parts separated by '.')
+	parts := strings.Split(token, ".")
+	if len(parts) < 3 {
+		log.Println("[startup] BOT_TOKEN format looks invalid (expected 3 segments). Refusing to connect.")
+		botStatus = "invalid_token"
+		select {}
+	}
+
+	masked := func(t string) string {
+		if len(t) <= 10 {
+			return "***"
+		}
+		return t[:4] + "..." + t[len(t)-4:]
+	}(token)
+	log.Printf("[startup] Retrieved bot token (masked): %s | segments=%d", masked, len(parts))
 
 	// Create Discord session
 	var err error
@@ -81,7 +99,7 @@ func main() {
 	// Optional: uncomment if you later need message content
 	// session.Identify.Intents |= discordgo.IntentMessageContent
 
-	log.Println("Discord session created, opening gateway connection...")
+	log.Println("[discord] Discord session object created, opening gateway connection...")
 
 	// Add event handlers
 	session.AddHandler(onReady)
@@ -94,14 +112,14 @@ func main() {
 		botStatus = "connection_failed"
 		select {}
 	}
-	log.Println("Gateway connection attempt initiated, waiting for READY event...")
+	log.Println("[discord] Gateway connection attempt initiated, waiting for READY event (30s timeout)...")
 
 	// Wait for READY or timeout to help diagnose hanging
 	select {
 	case <-readyCh:
-		log.Println("Received READY event from Discord.")
+		log.Println("[discord] Received READY event from Discord.")
 	case <-time.After(30 * time.Second):
-		log.Println("WARNING: Did not receive READY within 30s. Check token, intents, or gateway status.")
+		log.Println("[warn] Did not receive READY within 30s. Verify token, enabled intents (SERVER MEMBERS & others in Dev Portal), and that the bot is invited to at least one guild.")
 	}
 	defer session.Close()
 
