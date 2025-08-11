@@ -53,7 +53,7 @@ const (
 
 // InitializeJackpotManager sets up the jackpot system
 func InitializeJackpotManager() error {
-	log.Println("[jackpot] InitializeJackpotManager start")
+	log.Println("[jackpot] init start")
 	JackpotMgr = &JackpotManager{jackpots: make(map[JackpotType]*Jackpot)}
 	if err := JackpotMgr.createJackpotsTable(); err != nil {
 		return fmt.Errorf("failed to create jackpots table: %w", err)
@@ -62,7 +62,7 @@ func InitializeJackpotManager() error {
 		log.Printf("[jackpot] loadJackpots error: %v", err)
 		return err
 	}
-	log.Println("[jackpot] InitializeJackpotManager complete")
+	log.Println("[jackpot] init complete")
 	return nil
 }
 
@@ -87,7 +87,7 @@ func (jm *JackpotManager) createJackpotsTable() error {
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		)`
 
-	log.Println("[jackpot] Creating jackpots table (timeout 3s)...")
+	// creating table (silent unless error)
 	_, err := DB.Exec(ctx, query)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -96,7 +96,7 @@ func (jm *JackpotManager) createJackpotsTable() error {
 		return fmt.Errorf("failed to create jackpots table: %w", err)
 	}
 
-	log.Println("jackpots table created/verified successfully")
+	// table ready
 	return nil
 }
 
@@ -116,7 +116,7 @@ func (jm *JackpotManager) loadJackpots() error {
 			   last_winner, last_win_amount, last_win_time, updated_at
 		FROM jackpots`
 
-	log.Println("[jackpot] Loading jackpots from database (timeout 3s)...")
+	// loading jackpots
 	rows, err := DB.Query(ctx, query)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -154,11 +154,11 @@ func (jm *JackpotManager) loadJackpots() error {
 	}
 
 	if loaded == 0 { // nothing persisted yet; write defaults
-		log.Println("[jackpot] No jackpots found in DB; saving defaults (no rows loaded)")
+		log.Println("[jackpot] seeding defaults (empty table)")
 		if err := jm.saveDefaultJackpots(); err != nil {
 			return err
 		}
-		log.Println("[jackpot] Default jackpots saved")
+		// defaults saved
 		jm.logRowCount()
 		return nil
 	}
@@ -170,7 +170,7 @@ func (jm *JackpotManager) loadJackpots() error {
 	}
 	jm.mutex.Unlock()
 
-	log.Printf("Loaded %d jackpots from database", loaded)
+	log.Printf("[jackpot] loaded=%d", loaded)
 	jm.logRowCount()
 	return nil
 }
@@ -211,7 +211,7 @@ func (jm *JackpotManager) PruneToSlotsOnly() {
 
 // saveDefaultJackpots saves default jackpots to database
 func (jm *JackpotManager) saveDefaultJackpots() error {
-	log.Println("[jackpot] saveDefaultJackpots start")
+	// save defaults
 	if DB == nil {
 		log.Println("[jackpot] DB nil; skipping saveDefaultJackpots (running in memory-only mode)")
 		return nil
@@ -225,7 +225,7 @@ func (jm *JackpotManager) saveDefaultJackpots() error {
 
 	inserted := 0
 	for _, jackpot := range jm.jackpots {
-		log.Printf("[jackpot] upserting jackpot type=%s seed=%d amount=%d rate=%.4f", jackpot.Type, jackpot.SeedAmount, jackpot.Amount, jackpot.ContributionRate)
+		// upsert jackpot type
 		if ctx.Err() != nil {
 			return fmt.Errorf("context expired before insert: %w", ctx.Err())
 		}
@@ -254,7 +254,6 @@ func (jm *JackpotManager) saveDefaultJackpots() error {
 		jackpot.Amount = persistedAmount // ensure memory matches DB
 		inserted++
 	}
-	log.Printf("[jackpot] Saved/updated %d jackpots (expected=%d)", inserted, len(jm.jackpots))
 	jm.logRowCount()
 	// Extra verification pass
 	jm.ensurePersisted()
@@ -289,7 +288,7 @@ func (jm *JackpotManager) ensurePersisted() {
 			log.Printf("[jackpot] ensurePersisted MISSING jackpot type=%s in DB after save", jt)
 		}
 	}
-	log.Printf("[jackpot] ensurePersisted rows=%d detailed=%v", len(found), found)
+	// ensurePersisted check complete
 }
 
 // logRowCount prints current jackpot row count for diagnostics
@@ -333,8 +332,7 @@ func (jm *JackpotManager) ContributeToJackpot(jackpotType JackpotType, betAmount
 			log.Printf("[jackpot] ContributeToJackpot db update err type=%s: %v", jackpotType, err)
 		}
 	}
-	log.Printf("[jackpot] Added %d chips to %s jackpot (bet: %d, rate: %.4f). New total: %d",
-		contribution, jackpotType, betAmount, snapshot.ContributionRate, snapshot.Amount)
+	// contribution applied
 	return contribution, nil
 }
 
@@ -517,7 +515,7 @@ func (jm *JackpotManager) AddJackpotAmount(jackpotType JackpotType, amount int64
 			return fmt.Errorf("failed to update jackpot in database: %w", err)
 		}
 	}
-	log.Printf("[jackpot] Added %d chips to %s jackpot. New total: %d", amount, jackpotType, snapshot.Amount)
+	// manual add
 	return nil
 }
 

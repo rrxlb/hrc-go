@@ -66,13 +66,10 @@ func RegisterSlotsCommand() *discordgo.ApplicationCommand {
 
 // HandleSlotsCommand handles /slots
 func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	start := time.Now()
-	log.Printf("[slots] command invoked user=%s", i.Member.User.ID)
 	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
 		log.Printf("[slots] defer failed: %v", err)
 		return
 	}
-	log.Printf("[slots] deferred in %dms", time.Since(start).Milliseconds())
 
 	betStr := i.ApplicationCommandData().Options[0].StringValue()
 	userID, _ := utils.ParseUserID(i.Member.User.ID)
@@ -82,21 +79,18 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		log.Printf("[slots] user fetch error=%v editErr=%v", err, editErr)
 		return
 	}
-	log.Printf("[slots] user fetched chips=%d xp=%d", user.Chips, user.TotalXP)
 	bet, err := utils.ParseBet(betStr, user.Chips)
 	if err != nil {
 		editErr := utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet error: %s", err.Error()), 0xFF0000), nil)
 		log.Printf("[slots] bet parse error=%v editErr=%v", err, editErr)
 		return
 	}
-	log.Printf("[slots] bet parsed raw=%d", bet)
 	adjusted, note := normalizeBetForPaylines(bet, user.Chips)
 	if adjusted == 0 {
 		editErr := utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet must be at least %d & divisible by %d", minBet, payLines), 0xFF0000), nil)
 		log.Printf("[slots] bet normalization failed editErr=%v", editErr)
 		return
 	}
-	log.Printf("[slots] bet normalized adjusted=%d note=%q", adjusted, note)
 	game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, BetNote: note, Rand: rand.New(rand.NewSource(time.Now().UnixNano())), UsedOriginal: true}
 	game.BaseGame.CountWinLossMinRatio = 0.20
 	if err := game.ValidateBet(); err != nil {
@@ -104,34 +98,29 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		log.Printf("[slots] validate bet error=%v editErr=%v", err, editErr)
 		return
 	}
-	log.Printf("[slots] bet validated")
 	initial := game.buildEmbed("", 0, 0, false, 0)
 	if err := utils.EditOriginalInteraction(s, i, initial, nil); err != nil {
 		log.Printf("[slots] initial edit failed: %v", err)
 		return
 	}
-	log.Printf("[slots] initial edit success")
 	// Contribute to jackpot asynchronously to avoid blocking main interaction flow
 	if utils.JackpotMgr != nil {
-		log.Printf("[slots] spawning jackpot contribution goroutine bet=%d", adjusted)
 		go func(b int64) {
 			defer func() { recover() }()
 			utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, b)
-			log.Printf("[slots] jackpot contribution async done bet=%d", b)
 		}(adjusted)
 	}
 	// Fetch message ID for animation
 	if orig, err := s.InteractionResponse(i.Interaction); err == nil {
 		game.MessageID = orig.ID
 		game.ChannelID = orig.ChannelID
-		log.Printf("[slots] obtained original message id=%s", game.MessageID)
+		// message id captured
 	} else {
 		log.Printf("[slots] failed to get original response: %v", err)
 		return
 	}
-	log.Printf("[slots] starting play()")
+	// start play loop
 	game.play()
-	log.Printf("[slots] play finished totalDuration=%dms", time.Since(start).Milliseconds())
 }
 
 // normalize bet to multiple of paylines
@@ -159,8 +148,7 @@ func (g *Game) play() {
 			log.Printf("[slots] panic recovered: %v", r)
 		}
 	}()
-	playStart := time.Now()
-	log.Printf("[slots] play() start user=%d bet=%d", g.UserID, g.Bet)
+	// play start
 	// Capture pre-game rank for rank-up detection
 	beforeRank := getRankForXP(func() int64 {
 		if g.BaseGame.UserData != nil {
@@ -181,13 +169,10 @@ func (g *Game) play() {
 		g.ChannelID = msg.ChannelID
 		log.Printf("[slots] obtained message via followup id=%s", g.MessageID)
 	}
-	log.Printf("[slots] creating reels")
 	final := g.createReels()
-	log.Printf("[slots] reels generated user=%d symbols=%s", g.UserID, formatReels(final))
 	g.animateSpin(final)
 	g.Reels = final
 	totalWinnings, jackpotLine := g.calculateResults()
-	log.Printf("[slots] results calculated winnings=%d jackpotLine=%v", totalWinnings, jackpotLine)
 	jackpotPayout := int64(0)
 	if jackpotLine && utils.JackpotMgr != nil {
 		won, amount, _ := utils.JackpotMgr.TryWinJackpot(utils.JackpotSlots, g.UserID, g.Bet, 1.0)
@@ -248,8 +233,6 @@ func (g *Game) play() {
 	embeds := []*discordgo.MessageEmbed{finalEmbed}
 	if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds, Components: &components}); err != nil {
 		log.Printf("[slots] final (pre-DB) edit failed: %v", err)
-	} else {
-		log.Printf("[slots] final (pre-DB) edit success user=%d duration=%dms", g.UserID, time.Since(playStart).Milliseconds())
 	}
 	// Fallback retry: sometimes the final edit may be lost; re-issue once after short delay if message not in final phase
 	go func(msgID, channelID string, embed *discordgo.MessageEmbed, comps []discordgo.MessageComponent) {
@@ -267,7 +250,7 @@ func (g *Game) play() {
 		if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: msgID, Channel: channelID, Embeds: &embedsRetry, Components: &comps}); err != nil {
 			log.Printf("[slots] fallback final edit failed: %v", err)
 		} else {
-			log.Printf("[slots] fallback final edit applied")
+			// fallback applied
 		}
 	}(g.MessageID, g.ChannelID, finalEmbed, components)
 	if g.BetNote != "" {
@@ -300,15 +283,13 @@ func (g *Game) play() {
 			embeds2 := []*discordgo.MessageEmbed{finalEmbed2}
 			if _, e := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds2, Components: &components}); e != nil {
 				log.Printf("[slots] post-DB jackpot embed edit failed: %v", e)
-			} else {
-				log.Printf("[slots] post-DB jackpot embed edit success")
 			}
 		}
 		afterRank := getRankForXP(updatedUser.TotalXP)
 		if before.Name != "" && afterRank.Name != "" && afterRank.Name != before.Name {
 			g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Embeds: []*discordgo.MessageEmbed{utils.CreateBrandedEmbed("🎊 Rank Up!", fmt.Sprintf("%s %s → %s %s", before.Icon, before.Name, afterRank.Icon, afterRank.Name), 0xFFD700)}, Flags: discordgo.MessageFlagsEphemeral})
 		}
-		log.Printf("[slots] async finalize complete")
+		// finalize complete
 	}(profit, xpGain, beforeRank, initialJackpot)
 }
 
