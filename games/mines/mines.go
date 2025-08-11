@@ -310,7 +310,8 @@ func handleCashout(s *discordgo.Session, i *discordgo.InteractionCreate, g *Game
 		newBal = userAfter.Chips
 	}
 
-	comps := disableAllComponents(buildComponents(g))
+	// Hide components in final state (compact)
+	comps := []discordgo.MessageComponent{}
 	embed := createMinesEmbed(g, "final", reason, profit, xp, newBal)
 	_ = utils.UpdateComponentInteraction(s, i, embed, comps)
 
