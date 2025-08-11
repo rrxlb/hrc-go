@@ -305,33 +305,32 @@ func (jm *JackpotManager) logRowCount() {
 
 // ContributeToJackpot adds a contribution to the specified jackpot
 func (jm *JackpotManager) ContributeToJackpot(jackpotType JackpotType, betAmount int64) (int64, error) {
+	// First: update in-memory state under lock quickly
 	jm.mutex.Lock()
-	defer jm.mutex.Unlock()
-
 	jackpot, exists := jm.jackpots[jackpotType]
 	if !exists {
+		jm.mutex.Unlock()
 		return 0, fmt.Errorf("jackpot type %s not found", jackpotType)
 	}
-
 	contribution := int64(float64(betAmount) * jackpot.ContributionRate)
 	if contribution <= 0 {
-		return 0, nil // No contribution needed for small bets
+		jm.mutex.Unlock()
+		return 0, nil
 	}
-
 	jackpot.Amount += contribution
 	jackpot.UpdatedAt = time.Now()
+	// Copy values needed for DB write
+	snapshot := *jackpot
+	jm.mutex.Unlock()
 
-	// Update database if connected
+	// Second: perform DB write outside lock
 	if DB != nil {
-		if err := jm.updateJackpotInDB(jackpot); err != nil {
-			log.Printf("Failed to update jackpot %s in database: %v", jackpotType, err)
-			// Continue anyway - we have it in memory
+		if err := jm.updateJackpotInDB(&snapshot); err != nil {
+			log.Printf("[jackpot] ContributeToJackpot db update err type=%s: %v", jackpotType, err)
 		}
 	}
-
 	log.Printf("[jackpot] Added %d chips to %s jackpot (bet: %d, rate: %.4f). New total: %d",
-		contribution, jackpotType, betAmount, jackpot.ContributionRate, jackpot.Amount)
-
+		contribution, jackpotType, betAmount, snapshot.ContributionRate, snapshot.Amount)
 	return contribution, nil
 }
 
@@ -499,24 +498,22 @@ func (jm *JackpotManager) ResetJackpot(jackpotType JackpotType) error {
 // AddJackpotAmount manually adds amount to jackpot (admin function)
 func (jm *JackpotManager) AddJackpotAmount(jackpotType JackpotType, amount int64) error {
 	jm.mutex.Lock()
-	defer jm.mutex.Unlock()
-
 	jackpot, exists := jm.jackpots[jackpotType]
 	if !exists {
+		jm.mutex.Unlock()
 		return fmt.Errorf("jackpot type %s not found", jackpotType)
 	}
-
 	jackpot.Amount += amount
 	jackpot.UpdatedAt = time.Now()
+	snapshot := *jackpot
+	jm.mutex.Unlock()
 
-	// Update database
 	if DB != nil {
-		if err := jm.updateJackpotInDB(jackpot); err != nil {
+		if err := jm.updateJackpotInDB(&snapshot); err != nil {
 			return fmt.Errorf("failed to update jackpot in database: %w", err)
 		}
 	}
-
-	log.Printf("[jackpot] Added %d chips to %s jackpot. New total: %d", amount, jackpotType, jackpot.Amount)
+	log.Printf("[jackpot] Added %d chips to %s jackpot. New total: %d", amount, jackpotType, snapshot.Amount)
 	return nil
 }
 

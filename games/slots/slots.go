@@ -203,6 +203,14 @@ func (g *Game) play() {
 		preBalance = g.BaseGame.UserData.Chips
 	}
 	newBalance := preBalance + profit
+	// Fetch jackpot amount BEFORE launching any async writes to avoid lock contention
+	jackpotAmount := int64(0)
+	if utils.JackpotMgr != nil {
+		if amt, err := utils.JackpotMgr.GetJackpotAmount(utils.JackpotSlots); err == nil {
+			jackpotAmount = amt
+		}
+	}
+	// Launch loss contribution after reading jackpot amount
 	if profit < 0 && utils.JackpotMgr != nil {
 		loss := -profit
 		go func(l int64) {
@@ -213,13 +221,6 @@ func (g *Game) play() {
 	xpGain := int64(0)
 	if profit > 0 {
 		xpGain = profit * utils.XPPerProfit
-	}
-	// Fetch jackpot amount now so final embed shows current value
-	jackpotAmount := int64(0)
-	if utils.JackpotMgr != nil {
-		if amt, err := utils.JackpotMgr.GetJackpotAmount(utils.JackpotSlots); err == nil {
-			jackpotAmount = amt
-		}
 	}
 	outcome := "No wins this time. Better luck next time!"
 	if totalWinnings > 0 {
