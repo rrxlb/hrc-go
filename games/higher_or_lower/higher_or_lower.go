@@ -182,7 +182,7 @@ func (g *Game) handleGuess(s *discordgo.Session, i *discordgo.InteractionCreate,
 		return
 	}
 	// Incorrect guess ends game (lost). Provide next card for final embed.
-	g.endGame(s, i, false, false, 0, &next)
+	g.endGame(s, i, true, false, 0, &next)
 }
 
 func (g *Game) cashOut(s *discordgo.Session, i *discordgo.InteractionCreate) {
