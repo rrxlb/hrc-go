@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net/http"
@@ -79,11 +80,31 @@ func main() {
 			break
 		}
 	}
+
+	// Sanitize token (remove quotes, leading Bot prefix, accidental export, etc.)
+	token = sanitizeToken(token)
 	if token == "" {
 		log.Println("Bot token missing (BOT_TOKEN). Exiting idle.")
 		botStatus = "no_token"
 		select {}
 	}
+
+	// Basic structural validation (3 segments, first decodes to numeric ID)
+	parts := strings.Split(token, ".")
+	if len(parts) < 3 {
+		log.Printf("Token appears malformed (segments=%d). Recheck BOT_TOKEN value.", len(parts))
+		botStatus = "invalid_token"
+		select {}
+	}
+	if userIDPart, err := base64.RawStdEncoding.DecodeString(parts[0]); err == nil {
+		// Expect numeric user ID
+		if _, convErr := strconv.ParseInt(string(userIDPart), 10, 64); convErr != nil {
+			log.Printf("First token segment decoded but not numeric (%q). Token likely wrong.", string(userIDPart))
+		}
+	} else {
+		log.Printf("Failed to base64 decode first token segment: %v (segment=%s)", err, parts[0])
+	}
+	log.Printf("Token length=%d characters (sanitized).", len(token))
 
 	// Create Discord session
 	var err error
@@ -471,4 +492,32 @@ func respondWithError(s *discordgo.Session, i *discordgo.InteractionCreate, mess
 			Flags:   discordgo.MessageFlagsEphemeral,
 		},
 	})
+}
+
+// sanitizeToken removes common accidental decorations around a token
+func sanitizeToken(raw string) string {
+	t := strings.TrimSpace(raw)
+	// Remove surrounding quotes
+	t = strings.Trim(t, "'\"")
+	// Strip leading 'export ' if user copied from shell
+	if strings.HasPrefix(strings.ToLower(t), "export ") {
+		parts := strings.SplitN(t, "=", 2)
+		if len(parts) == 2 {
+			t = strings.TrimSpace(parts[1])
+			t = strings.Trim(t, "'\"")
+		}
+	}
+	// Remove leading BOT_TOKEN= if present
+	if idx := strings.Index(t, "="); idx != -1 && idx < 25 { // token assignments usually small key before '='
+		maybeKey := t[:idx]
+		if strings.Contains(strings.ToUpper(maybeKey), "TOKEN") {
+			t = strings.TrimSpace(t[idx+1:])
+			t = strings.Trim(t, "'\"")
+		}
+	}
+	// Strip leading 'Bot ' prefix if mistakenly included
+	if strings.HasPrefix(strings.ToLower(t), "bot ") {
+		t = strings.TrimSpace(t[4:])
+	}
+	return t
 }
