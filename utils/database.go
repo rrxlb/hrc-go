@@ -87,13 +87,23 @@ func (j JSONB) Value() (driver.Value, error) {
 
 func (j *JSONB) Scan(value interface{}) error {
 	if value == nil {
-		*j = nil
+		*j = JSONB{}
 		return nil
 	}
 	
-	bytes, ok := value.([]byte)
-	if !ok {
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
 		return fmt.Errorf("cannot scan %T into JSONB", value)
+	}
+	
+	if len(bytes) == 0 {
+		*j = JSONB{}
+		return nil
 	}
 	
 	return json.Unmarshal(bytes, j)
