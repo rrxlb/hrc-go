@@ -65,42 +65,46 @@ func RegisterSlotsCommand() *discordgo.ApplicationCommand {
 
 // HandleSlotsCommand handles /slots
 func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	start := time.Now()
+	log.Printf("[slots] command invoked by user=%s", i.Member.User.ID)
 	betStr := i.ApplicationCommandData().Options[0].StringValue()
+	// Defer IMMEDIATELY to avoid 3s timeout regardless of downstream latency
+	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
+		log.Printf("[slots] failed immediate defer: %v", err)
+		return
+	}
+	log.Printf("[slots] deferred in %dms", time.Since(start).Milliseconds())
+
 	userID, _ := utils.ParseUserID(i.Member.User.ID)
 	user, err := utils.GetCachedUser(userID)
 	if err != nil {
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", "Error fetching user.", 0xFF0000), nil, true)
+		utils.TryEphemeralFollowup(s, i, "Error fetching user data.")
 		return
 	}
 	bet, err := utils.ParseBet(betStr, user.Chips)
 	if err != nil {
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", err.Error(), 0xFF0000), nil, true)
+		utils.TryEphemeralFollowup(s, i, fmt.Sprintf("Bet error: %s", err.Error()))
 		return
 	}
 	adjusted, note := normalizeBetForPaylines(bet, user.Chips)
 	if adjusted == 0 {
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet must be at least %d and divisible by %d.", minBet, payLines), 0xFF0000), nil, true)
+		utils.TryEphemeralFollowup(s, i, fmt.Sprintf("Bet must be at least %d and divisible by %d.", minBet, payLines))
 		return
 	}
 
 	game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, BetNote: note, Rand: rand.New(rand.NewSource(time.Now().UnixNano()))}
 	game.BaseGame.CountWinLossMinRatio = 0.20
 	if err := game.ValidateBet(); err != nil {
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", err.Error(), 0xFF0000), nil, true)
+		utils.TryEphemeralFollowup(s, i, err.Error())
 		return
 	}
 
-	if utils.JackpotMgr != nil { // base contribution similar to Python's ensure; here use configured rate
+	if utils.JackpotMgr != nil {
 		utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, adjusted)
 	}
 
-	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
-		log.Printf("[slots] failed to defer interaction: %v", err)
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", "Internal error deferring interaction.", 0xFF0000), nil, true)
-		return
-	}
-	// Run synchronously so total time (~2.2s animation) still within Discord 15m followup window
-	game.play()
+	// Run play asynchronously so we return control; animation + followups use webhook token
+	go game.play()
 }
 
 // normalize bet to multiple of paylines
@@ -176,8 +180,12 @@ func (g *Game) play() {
 	g.Phase = phaseFinal
 	finalEmbed := g.buildEmbed(formatReels(g.Reels), totalWinnings, xpGain, true, jackpotAmount)
 	finalEmbed.Fields = append(finalEmbed.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: outcome, Inline: false})
-	// Outcome already added inside buildEmbed ordering; append New Balance at end
+	// Append New Balance at end
 	finalEmbed.Fields = append(finalEmbed.Fields, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", utils.FormatChips(updatedUser.Chips), utils.ChipsEmoji), Inline: false})
+	// Jackpot color override
+	if jackpotPayout > 0 {
+		finalEmbed.Color = 0xFFD700
+	}
 	components := []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{utils.CreateButton("slots_spin_again_"+g.MessageID, "Spin Again", discordgo.SuccessButton, false, nil)}}}
 	// Edit followup message (not original interaction)
 	embeds := []*discordgo.MessageEmbed{finalEmbed}
@@ -298,12 +306,13 @@ func (g *Game) buildEmbed(reels string, winnings int64, xpGain int64, final bool
 	if final {
 		// Spacer field
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "\u200b", Value: "\u200b", Inline: false})
-		// Outcome is added externally by caller (play) after winnings computed; ensure placeholder if missing
 		// Jackpot field (always show current amount for visibility)
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Jackpot", Value: fmt.Sprintf("%s %s", utils.FormatChips(jackpotAmount), utils.ChipsEmoji), Inline: true})
+		// Bet field (needed for Spin Again parsing)
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Bet", Value: fmt.Sprintf("%s %s", utils.FormatChips(g.Bet), utils.ChipsEmoji), Inline: true})
 		if winnings > 0 {
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Winnings", Value: fmt.Sprintf("%s %s", utils.FormatChips(winnings), utils.ChipsEmoji), Inline: true})
-			if xpGain > 0 { // XP gating (premium display) simplified: always show
+			if xpGain > 0 { // XP gating simplified: always show
 				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP Gained", Value: fmt.Sprintf("+%s XP", utils.FormatChips(xpGain)), Inline: true})
 			}
 		}
