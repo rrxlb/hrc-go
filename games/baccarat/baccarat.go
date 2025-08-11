@@ -195,9 +195,9 @@ func (g *Game) finishViaComponentUpdate(s *discordgo.Session, i *discordgo.Inter
 	}
 	embed := baccaratResultEmbed(g, updatedUser.Chips, xpGain)
 	components := []discordgo.MessageComponent{utils.CreateActionRow(
-		utils.CreateButton("baccarat_player", "Player", discordgo.SuccessButton, true, &discordgo.ComponentEmoji{Name: ""}),
-		utils.CreateButton("baccarat_banker", "Banker", discordgo.DangerButton, true, &discordgo.ComponentEmoji{Name: ""}),
-		utils.CreateButton("baccarat_tie", "Tie", discordgo.SecondaryButton, true, &discordgo.ComponentEmoji{Name: ""}),
+		utils.CreateButton("baccarat_player", "Player", discordgo.SuccessButton, true, nil),
+		utils.CreateButton("baccarat_banker", "Banker", discordgo.DangerButton, true, nil),
+		utils.CreateButton("baccarat_tie", "Tie", discordgo.SecondaryButton, true, nil),
 	)}
 	if err := utils.UpdateComponentInteraction(s, i, embed, components); err != nil {
 		utils.BotLogf("baccarat", "UpdateComponentInteraction failed for user %d: %v", g.UserID, err)
