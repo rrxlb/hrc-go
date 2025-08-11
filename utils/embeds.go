@@ -127,10 +127,7 @@ func BlackjackGameEmbed(playerHands []HandData, dealerHand []string, dealerValue
 			title = fmt.Sprintf("Your Hand - %d", score)
 		}
 
-		// Add Ace clarification if needed
-		if hasAces {
-			handStr += " `(Aces can be 1 or 11)`"
-		}
+		// Removed Ace clarification text per request
 
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   title,
