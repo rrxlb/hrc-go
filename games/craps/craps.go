@@ -709,14 +709,28 @@ func HandleCrapsModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	betType := strings.TrimPrefix(custom, "craps_bet_modal_")
 	var amountStr string
-	for _, row := range i.ModalSubmitData().Components { // robust extraction
-		ar, ok := row.(discordgo.ActionsRow)
-		if !ok {
+	for idx, row := range i.ModalSubmitData().Components { // robust extraction with pointer/value handling
+		var ar discordgo.ActionsRow
+		switched := false
+		if v, ok := row.(discordgo.ActionsRow); ok {
+			ar = v
+			switched = true
+		} else if vp, ok := row.(*discordgo.ActionsRow); ok && vp != nil {
+			ar = *vp
+			switched = true
+		}
+		if !switched {
 			continue
 		}
-		for _, comp := range ar.Components {
-			if input, ok := comp.(*discordgo.TextInput); ok && input.CustomID == "bet_amount" {
-				amountStr = strings.TrimSpace(input.Value)
+		utils.BotLogf("CRAPS_MODAL", "row %d has %d components", idx, len(ar.Components))
+		for cidx, comp := range ar.Components {
+			if ti, ok := comp.(*discordgo.TextInput); ok {
+				utils.BotLogf("CRAPS_MODAL", "component %d type=TextInput id=%s value='%s'", cidx, ti.CustomID, ti.Value)
+				if ti.CustomID == "bet_amount" {
+					amountStr = strings.TrimSpace(ti.Value)
+				}
+			} else {
+				utils.BotLogf("CRAPS_MODAL", "component %d unexpected type %T", cidx, comp)
 			}
 		}
 	}
@@ -725,6 +739,13 @@ func HandleCrapsModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		for _, row := range i.ModalSubmitData().Components {
 			if ar, ok := row.(discordgo.ActionsRow); ok {
 				for _, comp := range ar.Components {
+					if input, ok := comp.(*discordgo.TextInput); ok {
+						amountStr = strings.TrimSpace(input.Value)
+						break
+					}
+				}
+			} else if arp, ok := row.(*discordgo.ActionsRow); ok && arp != nil {
+				for _, comp := range arp.Components {
 					if input, ok := comp.(*discordgo.TextInput); ok {
 						amountStr = strings.TrimSpace(input.Value)
 						break
