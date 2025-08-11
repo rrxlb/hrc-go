@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"log"
+	"math"
 	"strconv"
 	"sync"
 	"time"
@@ -35,6 +36,15 @@ type BaseGame struct {
 	mu                   sync.RWMutex
 }
 
+// Achievement check debouncing
+var (
+	lastAchievementCheck    = make(map[int64]time.Time)
+	achievementMutex        sync.RWMutex
+	achievementDebounceTime = 30 * time.Second
+	lastCleanup             time.Time
+	cleanupInterval         = 5 * time.Minute
+)
+
 // NewBaseGame creates a new base game instance
 func NewBaseGame(session *discordgo.Session, interaction *discordgo.InteractionCreate, bet int64, gameType string) *BaseGame {
 	userID := interaction.Member.User.ID
@@ -50,11 +60,6 @@ func NewBaseGame(session *discordgo.Session, interaction *discordgo.InteractionC
 		Session:              session,
 		CreatedAt:            time.Now(),
 	}
-}
-
-// parseUserID converts string user ID to int64
-func parseUserID(userID string) (int64, error) {
-	return strconv.ParseInt(userID, 10, 64)
 }
 
 // GetUserID returns the user ID
@@ -86,7 +91,7 @@ func (bg *BaseGame) IsGameOver() bool {
 
 // ValidateBet checks if the player has enough chips for the bet
 func (bg *BaseGame) ValidateBet() error {
-	user, err := GetUser(bg.UserID)
+	user, err := GetCachedUser(bg.UserID)
 	if err != nil {
 		return fmt.Errorf("failed to get user data: %w", err)
 	}
@@ -94,158 +99,205 @@ func (bg *BaseGame) ValidateBet() error {
 	bg.UserData = user
 	
 	if user.Chips < bg.Bet {
-		return fmt.Errorf("insufficient chips: you have %d, need %d", user.Chips, bg.Bet)
-	}
-	
-	if bg.Bet <= 0 {
-		return fmt.Errorf("bet must be greater than 0")
+		return fmt.Errorf("insufficient chips: need %d, have %d", bg.Bet, user.Chips)
 	}
 	
 	return nil
 }
 
-// EndGame handles the end of a game, updating user stats and returning updated user data
+// EndGame finalizes the game and updates user stats
 func (bg *BaseGame) EndGame(profit int64) (*User, error) {
 	bg.mu.Lock()
 	defer bg.mu.Unlock()
 	
 	if bg.IsGameOverFlag {
-		return bg.UserData, fmt.Errorf("game already ended")
+		return bg.UserData, nil
 	}
-	
 	bg.IsGameOverFlag = true
 	
-	// Update user data
-	updates := UserUpdateData{
-		ChipsIncrement: profit,
-	}
-	
-	// Determine win/loss/push
+	// Calculate XP gain
+	var xpGain int64 = 0
 	if profit > 0 {
-		updates.WinsIncrement = 1
-		// Award XP based on profit
-		xpGained := profit / 10 // 1 XP per 10 chips profit
-		if xpGained > 0 {
-			updates.TotalXPIncrement = xpGained
-			updates.CurrentXPIncrement = xpGained
-		}
-		log.Printf("Game %s: User %d won %d chips (XP: %d)", bg.GameType, bg.UserID, profit, xpGained)
-	} else if profit < 0 {
-		updates.LossesIncrement = 1
-		log.Printf("Game %s: User %d lost %d chips", bg.GameType, bg.UserID, -profit)
-	} else {
-		log.Printf("Game %s: User %d pushed (no chips change)", bg.GameType, bg.UserID)
+		xpGain = profit * XPPerProfit
 	}
 	
-	// Update user in database
-	updatedUser, err := UpdateUser(bg.UserID, updates)
+	// Determine if this game should count towards wins/losses
+	shouldCountWL := true
+	if bg.CountWinLossMinRatio > 0.0 && bg.UserData != nil {
+		requiredBet := int64(math.Ceil(float64(bg.UserData.Chips) * bg.CountWinLossMinRatio))
+		shouldCountWL = bg.Bet >= requiredBet
+	}
+	
+	// Prepare update data
+	updates := UserUpdateData{
+		ChipsIncrement:     profit,
+		TotalXPIncrement:   xpGain,
+		CurrentXPIncrement: xpGain,
+	}
+	
+	if profit > 0 && shouldCountWL {
+		updates.WinsIncrement = 1
+	} else if profit < 0 && shouldCountWL {
+		updates.LossesIncrement = 1
+	}
+	
+	// Update user in database and cache
+	updatedUser, err := UpdateCachedUser(bg.UserID, updates)
 	if err != nil {
-		log.Printf("Failed to update user %d after game: %v", bg.UserID, err)
-		return bg.UserData, fmt.Errorf("failed to update user data: %w", err)
+		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
 	
 	bg.UserData = updatedUser
 	
-	// Update jackpot (small contribution from each game)
-	if profit < 0 && -profit >= 100 { // Only on losses of 100+ chips
-		jackpotContribution := (-profit) / 100 // 1% of loss goes to jackpot
-		if jackpotContribution > 0 {
-			if newJackpot, err := UpdateJackpot(jackpotContribution); err == nil {
-				log.Printf("Jackpot increased by %d to %d", jackpotContribution, newJackpot)
-			}
-		}
-	}
+	// Check achievements with debouncing
+	go bg.checkAchievements(profit)
 	
 	return updatedUser, nil
 }
 
-// SetGameOver marks the game as over
-func (bg *BaseGame) SetGameOver() {
-	bg.mu.Lock()
-	defer bg.mu.Unlock()
-	bg.IsGameOverFlag = true
+// checkAchievements checks and awards achievements for the user (with debouncing)
+func (bg *BaseGame) checkAchievements(profit int64) {
+	currentTime := time.Now()
+	
+	// Periodic cleanup of achievement check cache
+	achievementMutex.Lock()
+	if currentTime.Sub(lastCleanup) > cleanupInterval {
+		bg.cleanupAchievementCache(currentTime)
+		lastCleanup = currentTime
+	}
+	
+	lastCheck, exists := lastAchievementCheck[bg.UserID]
+	if exists && currentTime.Sub(lastCheck) < achievementDebounceTime {
+		achievementMutex.Unlock()
+		return // Too soon since last check
+	}
+	
+	lastAchievementCheck[bg.UserID] = currentTime
+	achievementMutex.Unlock()
+	
+	// TODO: Implement achievement checking logic
+	// This would involve checking various achievement types and awarding them
+	// For now, just log that we would check achievements
+	log.Printf("Would check achievements for user %d with profit %d", bg.UserID, profit)
 }
 
-// SendInteractionResponse sends a response to a Discord interaction
-func SendInteractionResponse(session *discordgo.Session, interaction *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, ephemeral bool) error {
-	data := &discordgo.InteractionResponseData{
-		Embeds: []*discordgo.MessageEmbed{embed},
+// cleanupAchievementCache removes old entries from the achievement check cache
+func (bg *BaseGame) cleanupAchievementCache(currentTime time.Time) {
+	cutoffTime := currentTime.Add(-achievementDebounceTime * 2)
+	
+	for userID, timestamp := range lastAchievementCheck {
+		if timestamp.Before(cutoffTime) {
+			delete(lastAchievementCheck, userID)
+		}
 	}
 	
-	if len(components) > 0 {
-		data.Components = components
+	log.Printf("Cleaned up achievement check cache, active entries: %d", len(lastAchievementCheck))
+}
+
+// RespondWithError sends an error response to the user
+func (bg *BaseGame) RespondWithError(message string) error {
+	embed := &discordgo.MessageEmbed{
+		Title:       "❌ Error",
+		Description: message,
+		Color:       0xff0000, // Red
 	}
 	
-	if ephemeral {
-		data.Flags = discordgo.MessageFlagsEphemeral
-	}
-	
-	return session.InteractionRespond(interaction.Interaction, &discordgo.InteractionResponse{
+	response := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: data,
-	})
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+			Flags:  discordgo.MessageFlagsEphemeral,
+		},
+	}
+	
+	return bg.Session.InteractionRespond(bg.Interaction.Interaction, response)
 }
 
-// EditInteractionResponse edits a Discord interaction response
-func EditInteractionResponse(session *discordgo.Session, interaction *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
-	data := &discordgo.WebhookEdit{
-		Embeds: &[]*discordgo.MessageEmbed{embed},
+// SendFollowup sends a followup message
+func (bg *BaseGame) SendFollowup(embed *discordgo.MessageEmbed, ephemeral bool) error {
+	flags := uint64(0)
+	if ephemeral {
+		flags = discordgo.MessageFlagsEphemeral
 	}
 	
-	if len(components) > 0 {
-		data.Components = &components
-	}
+	_, err := bg.Session.FollowupMessageCreate(bg.Interaction.Interaction, true, &discordgo.WebhookParams{
+		Embeds: []*discordgo.MessageEmbed{embed},
+		Flags:  flags,
+	})
 	
-	_, err := session.InteractionResponseEdit(interaction.Interaction, data)
 	return err
 }
 
-// FormatChips formats chip amounts with emoji
-func FormatChips(amount int64) string {
-	return fmt.Sprintf("%d <:chips:1396988413151940629>", amount)
-}
-
-// CalculateXPGain calculates XP gained from profit
-func CalculateXPGain(profit int64) int64 {
-	if profit <= 0 {
-		return 0
+// UpdateOriginalResponse updates the original interaction response
+func (bg *BaseGame) UpdateOriginalResponse(embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
+	edit := &discordgo.WebhookEdit{
+		Embeds:     &[]*discordgo.MessageEmbed{embed},
+		Components: &components,
 	}
-	// 1 XP per 10 chips profit, minimum 1 XP for any profit
-	xp := profit / 10
-	if xp == 0 && profit > 0 {
-		xp = 1
+	
+	_, err := bg.Session.InteractionResponseEdit(bg.Interaction.Interaction, edit)
+	return err
+}
+
+// Helper function to parse user ID from string to int64
+func parseUserID(userIDStr string) (int64, error) {
+	return strconv.ParseInt(userIDStr, 10, 64)
+}
+
+// GameManager manages active games
+type GameManager struct {
+	games map[string]Game
+	mutex sync.RWMutex
+}
+
+// Global game manager instance
+var Games = &GameManager{
+	games: make(map[string]Game),
+}
+
+// AddGame adds a game to the active games
+func (gm *GameManager) AddGame(gameID string, game Game) {
+	gm.mutex.Lock()
+	defer gm.mutex.Unlock()
+	gm.games[gameID] = game
+}
+
+// GetGame retrieves a game by ID
+func (gm *GameManager) GetGame(gameID string) (Game, bool) {
+	gm.mutex.RLock()
+	defer gm.mutex.RUnlock()
+	game, exists := gm.games[gameID]
+	return game, exists
+}
+
+// RemoveGame removes a game from active games
+func (gm *GameManager) RemoveGame(gameID string) {
+	gm.mutex.Lock()
+	defer gm.mutex.Unlock()
+	delete(gm.games, gameID)
+}
+
+// CleanupExpiredGames removes games that have been inactive too long
+func (gm *GameManager) CleanupExpiredGames(maxAge time.Duration) {
+	gm.mutex.Lock()
+	defer gm.mutex.Unlock()
+	
+	now := time.Now()
+	expiredGames := make([]string, 0)
+	
+	for gameID, game := range gm.games {
+		if baseGame, ok := game.(*BaseGame); ok {
+			if now.Sub(baseGame.CreatedAt) > maxAge {
+				expiredGames = append(expiredGames, gameID)
+			}
+		}
 	}
-	return xp
-}
-
-// GetChipsEmoji returns the chips emoji
-func GetChipsEmoji() string {
-	return "<:chips:1396988413151940629>"
-}
-
-// Constants for game configuration
-const (
-	// Blackjack constants
-	DeckCount             = 6
-	ShuffleThreshold      = 0.25
-	DealerStandValue      = 17
-	BlackjackPayout       = 1.5
-	FiveCardCharliePayout = 1.75
 	
-	// Baccarat constants
-	BaccaratPayout          = 1.0
-	BaccaratTiePayout       = 8.0
-	BaccaratBankerCommission = 0.05
+	for _, gameID := range expiredGames {
+		delete(gm.games, gameID)
+	}
 	
-	// General constants
-	BotColor = 0x5865F2
-)
-
-// GameTimeouts defines timeout durations for different games
-var GameTimeouts = map[string]time.Duration{
-	"blackjack": 60 * time.Second,
-	"baccarat":  45 * time.Second,
-	"craps":     60 * time.Second,
-	"roulette":  45 * time.Second,
-	"slots":     30 * time.Second,
+	if len(expiredGames) > 0 {
+		log.Printf("Cleaned up %d expired games", len(expiredGames))
+	}
 }

@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 )
@@ -38,15 +39,6 @@ func (c Card) GetValue(game string) int {
 		return 0
 	}
 }
-
-// CardRanks defines the basic values for card ranks
-var CardRanks = map[string]int{
-	"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
-	"J": 10, "Q": 10, "K": 10, "A": 11,
-}
-
-// CardSuits defines the available card suits
-var CardSuits = []string{"♠️", "♥️", "♦️", "♣️"}
 
 // getBlackjackValue returns the blackjack value of the card
 func (c Card) getBlackjackValue() int {
@@ -106,80 +98,98 @@ type Deck struct {
 // NewDeck creates a new deck of cards
 func NewDeck(numDecks int, game string) *Deck {
 	deck := &Deck{
-		Cards:      make([]Card, 0, numDecks*52),
+		Cards:      make([]Card, 0),
 		NumDecks:   numDecks,
 		Game:       game,
 		DealtCards: 0,
-		TotalCards: numDecks * 52,
 		rng:        rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
-
-	// Create cards for each deck
-	ranks := []string{"A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"}
-	suits := CardSuits
-
-	for d := 0; d < numDecks; d++ {
-		for _, suit := range suits {
-			for _, rank := range ranks {
-				deck.Cards = append(deck.Cards, NewCard(rank, suit))
-			}
-		}
-	}
-
-	deck.Shuffle()
+	
+	deck.buildDeck()
+	deck.shuffle()
+	
 	return deck
 }
 
-// Shuffle shuffles the deck
-func (d *Deck) Shuffle() {
-	d.rng.Shuffle(len(d.Cards), func(i, j int) {
-		d.Cards[i], d.Cards[j] = d.Cards[j], d.Cards[i]
-	})
+// buildDeck builds a standard 52-card deck multiplied by numDecks
+func (d *Deck) buildDeck() {
+	d.Cards = make([]Card, 0, 52*d.NumDecks)
+	
+	// Create all cards for each deck
+	for deckNum := 0; deckNum < d.NumDecks; deckNum++ {
+		for _, suit := range CardSuits {
+			for rank := range CardRanks {
+				card := NewCard(rank, suit)
+				d.Cards = append(d.Cards, card)
+			}
+		}
+	}
+	
+	d.TotalCards = len(d.Cards)
 	d.DealtCards = 0
 }
 
-// Deal deals one card from the deck
-func (d *Deck) Deal() Card {
-	if d.DealtCards >= len(d.Cards) {
-		// Reshuffle if no cards left
-		d.Shuffle()
-	}
+// Shuffle shuffles the deck
+func (d *Deck) shuffle() {
+	d.rng.Shuffle(len(d.Cards), func(i, j int) {
+		d.Cards[i], d.Cards[j] = d.Cards[j], d.Cards[i]
+	})
+}
 
+// Deal deals a single card from the deck
+func (d *Deck) Deal() Card {
+	if d.IsEmpty() {
+		// If deck is empty, rebuild and shuffle
+		d.buildDeck()
+		d.shuffle()
+	}
+	
 	card := d.Cards[d.DealtCards]
 	d.DealtCards++
+	
 	return card
 }
 
-// CardsRemaining returns the number of cards left in the deck
-func (d *Deck) CardsRemaining() int {
-	return len(d.Cards) - d.DealtCards
-}
-
-// ShouldShuffle determines if the deck should be reshuffled based on game rules
-func (d *Deck) ShouldShuffle() bool {
-	remaining := float64(d.CardsRemaining())
-	total := float64(d.TotalCards)
-	threshold := 0.25 // Shuffle when 25% of cards remain
-
-	switch d.Game {
-	case "blackjack":
-		threshold = 0.25
-	case "baccarat":
-		threshold = 0.15
-	default:
-		threshold = 0.25
+// DealMultiple deals multiple cards from the deck
+func (d *Deck) DealMultiple(count int) []Card {
+	cards := make([]Card, count)
+	for i := 0; i < count; i++ {
+		cards[i] = d.Deal()
 	}
-
-	return (remaining / total) <= threshold
+	return cards
 }
 
-// Hand represents a hand of playing cards
+// IsEmpty checks if the deck is empty or needs reshuffling
+func (d *Deck) IsEmpty() bool {
+	return d.DealtCards >= d.TotalCards
+}
+
+// ShouldShuffle checks if the deck should be shuffled based on the shuffle threshold
+func (d *Deck) ShouldShuffle() bool {
+	remaining := float64(d.TotalCards - d.DealtCards)
+	total := float64(d.TotalCards)
+	
+	return (remaining / total) <= ShuffleThreshold
+}
+
+// CardsRemaining returns the number of cards remaining in the deck
+func (d *Deck) CardsRemaining() int {
+	return d.TotalCards - d.DealtCards
+}
+
+// Reset resets the deck to its initial state
+func (d *Deck) Reset() {
+	d.buildDeck()
+	d.shuffle()
+}
+
+// Hand represents a collection of cards
 type Hand struct {
 	Cards []Card `json:"cards"`
 	Game  string `json:"game"`
 }
 
-// NewHand creates a new hand
+// NewHand creates a new empty hand
 func NewHand(game string) *Hand {
 	return &Hand{
 		Cards: make([]Card, 0),
@@ -192,7 +202,12 @@ func (h *Hand) AddCard(card Card) {
 	h.Cards = append(h.Cards, card)
 }
 
-// GetValue returns the total value of the hand for the specific game
+// AddCards adds multiple cards to the hand
+func (h *Hand) AddCards(cards []Card) {
+	h.Cards = append(h.Cards, cards...)
+}
+
+// GetValue calculates the total value of the hand for the specific game
 func (h *Hand) GetValue() int {
 	switch h.Game {
 	case "blackjack":
@@ -212,26 +227,25 @@ func (h *Hand) GetValue() int {
 func (h *Hand) getBlackjackValue() int {
 	total := 0
 	aces := 0
-
+	
 	for _, card := range h.Cards {
+		value := card.getBlackjackValue()
+		total += value
 		if card.IsAce() {
 			aces++
-			total += 11
-		} else {
-			total += card.GetValue("blackjack")
 		}
 	}
-
-	// Adjust for Aces
+	
+	// Adjust for Aces (count as 1 instead of 11 if total > 21)
 	for aces > 0 && total > 21 {
-		total -= 10
+		total -= 10 // Convert an Ace from 11 to 1
 		aces--
 	}
-
+	
 	return total
 }
 
-// getBaccaratValue calculates baccarat hand value (modulo 10)
+// getBaccaratValue calculates baccarat hand value (rightmost digit)
 func (h *Hand) getBaccaratValue() int {
 	total := 0
 	for _, card := range h.Cards {
@@ -240,59 +254,142 @@ func (h *Hand) getBaccaratValue() int {
 	return total % 10
 }
 
-// String returns string representation of the hand
-func (h *Hand) String() string {
-	result := ""
-	for i, card := range h.Cards {
-		if i > 0 {
-			result += " "
-		}
-		result += card.String()
-	}
-	return result
-}
-
-// IsBlackjack checks if the hand is a natural blackjack (21 with 2 cards)
+// IsBlackjack checks if the hand is a natural blackjack
 func (h *Hand) IsBlackjack() bool {
-	return h.Game == "blackjack" && len(h.Cards) == 2 && h.GetValue() == 21
+	if h.Game != "blackjack" || len(h.Cards) != 2 {
+		return false
+	}
+	
+	return h.GetValue() == 21
 }
 
-// IsBusted checks if the hand is busted (over 21 in blackjack)
-func (h *Hand) IsBusted() bool {
-	return h.Game == "blackjack" && h.GetValue() > 21
-}
-
-// IsSoft checks if the hand contains a "soft" Ace (counted as 11)
-func (h *Hand) IsSoft() bool {
+// IsBust checks if the hand is busted (> 21 in blackjack)
+func (h *Hand) IsBust() bool {
 	if h.Game != "blackjack" {
 		return false
 	}
+	
+	return h.GetValue() > 21
+}
 
-	total := 0
-	hasUsableAce := false
+// IsFiveCardCharlie checks if the hand qualifies for five card charlie
+func (h *Hand) IsFiveCardCharlie() bool {
+	if h.Game != "blackjack" {
+		return false
+	}
+	
+	return len(h.Cards) == 5 && !h.IsBust()
+}
 
+// HasAce checks if the hand contains an Ace
+func (h *Hand) HasAce() bool {
 	for _, card := range h.Cards {
 		if card.IsAce() {
-			if total+11 <= 21 {
-				total += 11
-				hasUsableAce = true
-			} else {
-				total += 1
-			}
-		} else {
-			total += card.GetValue("blackjack")
+			return true
 		}
 	}
+	return false
+}
 
-	return hasUsableAce && total <= 21
+// HasSoftAce checks if the hand has an Ace counted as 11
+func (h *Hand) HasSoftAce() bool {
+	if !h.HasAce() {
+		return false
+	}
+	
+	// Calculate value without soft ace conversion
+	hardTotal := 0
+	for _, card := range h.Cards {
+		if card.IsAce() {
+			hardTotal += 1
+		} else {
+			hardTotal += card.getBlackjackValue()
+		}
+	}
+	
+	// If we can use an ace as 11 without busting, we have a soft ace
+	return hardTotal + 10 <= 21
 }
 
 // CanSplit checks if the hand can be split (two cards of same rank)
 func (h *Hand) CanSplit() bool {
-	return len(h.Cards) == 2 && h.Cards[0].Rank == h.Cards[1].Rank
+	if len(h.Cards) != 2 {
+		return false
+	}
+	
+	// Check if both cards have the same rank or value
+	card1, card2 := h.Cards[0], h.Cards[1]
+	
+	// Allow splitting of any two 10-value cards (10, J, Q, K)
+	if card1.GetValue(h.Game) == 10 && card2.GetValue(h.Game) == 10 {
+		return true
+	}
+	
+	// Otherwise, must be same rank
+	return card1.Rank == card2.Rank
 }
 
-// Count returns the number of cards in the hand
-func (h *Hand) Count() int {
+// Split splits the hand into two separate hands
+func (h *Hand) Split() (*Hand, *Hand) {
+	if !h.CanSplit() {
+		return nil, nil
+	}
+	
+	hand1 := NewHand(h.Game)
+	hand2 := NewHand(h.Game)
+	
+	hand1.AddCard(h.Cards[0])
+	hand2.AddCard(h.Cards[1])
+	
+	return hand1, hand2
+}
+
+// String returns a string representation of the hand
+func (h *Hand) String() string {
+	if len(h.Cards) == 0 {
+		return "Empty hand"
+	}
+	
+	result := ""
+	for _, card := range h.Cards {
+		result += card.String() + " "
+	}
+	
+	return fmt.Sprintf("%s(%d)", result, h.GetValue())
+}
+
+// Size returns the number of cards in the hand
+func (h *Hand) Size() int {
 	return len(h.Cards)
+}
+
+// IsEmpty checks if the hand is empty
+func (h *Hand) IsEmpty() bool {
+	return len(h.Cards) == 0
+}
+
+// Clear removes all cards from the hand
+func (h *Hand) Clear() {
+	h.Cards = make([]Card, 0)
+}
+
+// GetLastCard returns the last card added to the hand
+func (h *Hand) GetLastCard() *Card {
+	if len(h.Cards) == 0 {
+		return nil
+	}
+	
+	return &h.Cards[len(h.Cards)-1]
+}
+
+// RemoveLastCard removes and returns the last card from the hand
+func (h *Hand) RemoveLastCard() *Card {
+	if len(h.Cards) == 0 {
+		return nil
+	}
+	
+	lastCard := h.Cards[len(h.Cards)-1]
+	h.Cards = h.Cards[:len(h.Cards)-1]
+	
+	return &lastCard
 }

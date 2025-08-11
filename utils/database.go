@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -466,6 +467,49 @@ func UpdateUser(userID int64, updates UserUpdateData) (*User, error) {
 	return user, nil
 }
 
+// Cache functionality
+var userCache = make(map[int64]*User)
+var cacheMutex sync.RWMutex
+
+// GetCachedUser retrieves user from cache or database
+func GetCachedUser(userID int64) (*User, error) {
+	// Check cache first
+	cacheMutex.RLock()
+	if user, exists := userCache[userID]; exists {
+		cacheMutex.RUnlock()
+		return user, nil
+	}
+	cacheMutex.RUnlock()
+	
+	// Get from database and cache it
+	user, err := GetUser(userID)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Cache the user
+	cacheMutex.Lock()
+	userCache[userID] = user
+	cacheMutex.Unlock()
+	
+	return user, nil
+}
+
+// UpdateCachedUser updates user and cache
+func UpdateCachedUser(userID int64, updates UserUpdateData) (*User, error) {
+	user, err := UpdateUser(userID, updates)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Update cache
+	cacheMutex.Lock()
+	userCache[userID] = user
+	cacheMutex.Unlock()
+	
+	return user, nil
+}
+
 // ParseBet parses a bet string and validates it
 func ParseBet(betStr string, userChips int64) (int64, error) {
 	betStr = strings.TrimSpace(strings.ToLower(betStr))
@@ -609,74 +653,4 @@ func UpdateJackpot(increment int64) (int64, error) {
 	}
 	
 	return newAmount, nil
-}
-
-// GetUserAchievements retrieves all achievements for a user
-func GetUserAchievements(userID int64) ([]UserAchievement, error) {
-	if DB == nil {
-		return nil, fmt.Errorf("database not connected")
-	}
-
-	ctx := context.Background()
-	
-	query := `
-	SELECT ua.id, ua.user_id, ua.achievement_id, ua.earned_at
-	FROM user_achievements ua
-	WHERE ua.user_id = $1
-	ORDER BY ua.earned_at DESC`
-	
-	rows, err := DB.Query(ctx, query, userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user achievements: %w", err)
-	}
-	defer rows.Close()
-	
-	var achievements []UserAchievement
-	for rows.Next() {
-		var ua UserAchievement
-		err := rows.Scan(&ua.ID, &ua.UserID, &ua.AchievementID, &ua.EarnedAt)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan user achievement: %w", err)
-		}
-		achievements = append(achievements, ua)
-	}
-	
-	return achievements, nil
-}
-
-// GetAllAchievements retrieves all available achievements
-func GetAllAchievements() ([]Achievement, error) {
-	if DB == nil {
-		return nil, fmt.Errorf("database not connected")
-	}
-
-	ctx := context.Background()
-	
-	query := `
-	SELECT id, name, description, icon, category, requirement_type, 
-	       requirement_value, chips_reward, xp_reward, hidden, created_at
-	FROM achievements
-	ORDER BY id`
-	
-	rows, err := DB.Query(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get achievements: %w", err)
-	}
-	defer rows.Close()
-	
-	var achievements []Achievement
-	for rows.Next() {
-		var a Achievement
-		err := rows.Scan(
-			&a.ID, &a.Name, &a.Description, &a.Icon, &a.Category,
-			&a.RequirementType, &a.RequirementValue, &a.ChipsReward,
-			&a.XPReward, &a.Hidden, &a.CreatedAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan achievement: %w", err)
-		}
-		achievements = append(achievements, a)
-	}
-	
-	return achievements, nil
 }
