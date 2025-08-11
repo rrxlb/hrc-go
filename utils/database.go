@@ -104,11 +104,14 @@ func SetupDatabase() error {
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		log.Println("DATABASE_URL not set - database features disabled")
-		return nil
+		return fmt.Errorf("DATABASE_URL environment variable not set")
 	}
 
+	log.Println("Attempting to connect to database...")
+	
 	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
+		log.Printf("Failed to parse DATABASE_URL: %v", err)
 		return fmt.Errorf("failed to parse database URL: %w", err)
 	}
 
@@ -118,22 +121,30 @@ func SetupDatabase() error {
 	config.MaxConnLifetime = time.Hour
 	config.MaxConnIdleTime = 5 * time.Minute
 
+	log.Println("Creating database pool...")
 	DB, err = pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
+		log.Printf("Failed to create database pool: %v", err)
 		return fmt.Errorf("failed to create database pool: %w", err)
 	}
 
+	log.Println("Testing database connection...")
 	// Test the connection
 	if err := DB.Ping(context.Background()); err != nil {
+		log.Printf("Failed to ping database: %v", err)
+		DB.Close()
+		DB = nil
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
+	log.Println("Creating/verifying database tables...")
 	// Create tables if they don't exist
 	if err := createTables(); err != nil {
+		log.Printf("Failed to create tables: %v", err)
 		return fmt.Errorf("failed to create tables: %w", err)
 	}
 
-	log.Printf("Database pool created successfully with %d-%d connections", 
+	log.Printf("✅ Database connected successfully with %d-%d connections", 
 		config.MinConns, config.MaxConns)
 	return nil
 }
@@ -234,6 +245,7 @@ func createTables() error {
 // GetUser retrieves user data from the database, creating if doesn't exist
 func GetUser(userID int64) (*User, error) {
 	if DB == nil {
+		log.Printf("GetUser: Database connection is nil")
 		return nil, fmt.Errorf("database not connected")
 	}
 
@@ -246,6 +258,7 @@ func GetUser(userID int64) (*User, error) {
 	       last_weekly, last_vote, last_bonus, premium_settings
 	FROM users WHERE user_id = $1`
 	
+	log.Printf("GetUser: Querying database for user ID: %d", userID)
 	err := DB.QueryRow(ctx, query, userID).Scan(
 		&user.UserID, &user.Chips, &user.TotalXP, &user.CurrentXP, &user.Prestige,
 		&user.Wins, &user.Losses, &user.DailyBonusesClaimed, &user.VotesCount,
@@ -255,18 +268,22 @@ func GetUser(userID int64) (*User, error) {
 	
 	if err != nil {
 		if err == pgx.ErrNoRows {
+			log.Printf("GetUser: User %d not found, creating new user", userID)
 			// Create new user if doesn't exist
 			return CreateUser(userID)
 		}
+		log.Printf("GetUser: Database error for user %d: %v", userID, err)
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 	
+	log.Printf("GetUser: Successfully retrieved user %d", userID)
 	return user, nil
 }
 
 // CreateUser creates a new user in the database with default values
 func CreateUser(userID int64) (*User, error) {
 	if DB == nil {
+		log.Printf("CreateUser: Database connection is nil")
 		return nil, fmt.Errorf("database not connected")
 	}
 
@@ -284,6 +301,8 @@ func CreateUser(userID int64) (*User, error) {
 		VotesCount:          0,
 		PremiumSettings:     JSONB{},
 	}
+	
+	log.Printf("CreateUser: Creating new user with ID: %d", userID)
 	
 	query := `
 	INSERT INTO users (user_id, chips, total_xp, current_xp, prestige, wins, losses,
@@ -306,9 +325,11 @@ func CreateUser(userID int64) (*User, error) {
 	)
 	
 	if err != nil {
+		log.Printf("CreateUser: Failed to create user %d: %v", userID, err)
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
 	
+	log.Printf("CreateUser: Successfully created user %d", userID)
 	return user, nil
 }
 
