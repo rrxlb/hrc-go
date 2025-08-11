@@ -102,18 +102,18 @@ func (jm *JackpotManager) createJackpotsTable() error {
 
 // loadJackpots loads existing jackpots from database or creates defaults
 func (jm *JackpotManager) loadJackpots() error {
-	// Initialize default jackpots first
+	// Initialize defaults into memory first
 	jm.initializeDefaultJackpots()
 
 	if DB == nil {
-		return nil // Skip database loading in offline mode
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	query := `
-		SELECT id, type, amount, seed_amount, contribution_rate, 
-		       last_winner, last_win_amount, last_win_time, updated_at
+		SELECT id, type, amount, seed_amount, contribution_rate,
+			   last_winner, last_win_amount, last_win_time, updated_at
 		FROM jackpots`
 
 	log.Println("[jackpot] Loading jackpots from database (timeout 3s)...")
@@ -122,23 +122,19 @@ func (jm *JackpotManager) loadJackpots() error {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("timeout querying jackpots: %w", err)
 		}
-		// If no jackpots exist, save defaults to database
-		if err == pgx.ErrNoRows {
+		if err == pgx.ErrNoRows { // none exist yet
 			return jm.saveDefaultJackpots()
 		}
 		return fmt.Errorf("failed to query jackpots: %w", err)
 	}
 	defer rows.Close()
 
-	jm.mutex.Lock()
-	defer jm.mutex.Unlock()
-
-	loadedCount := 0
+	loaded := 0
+	temp := make(map[JackpotType]*Jackpot)
 	for rows.Next() {
 		var jackpot Jackpot
 		var jackpotType string
-
-		err := rows.Scan(
+		if err := rows.Scan(
 			&jackpot.ID,
 			&jackpotType,
 			&jackpot.Amount,
@@ -148,20 +144,17 @@ func (jm *JackpotManager) loadJackpots() error {
 			&jackpot.LastWinAmount,
 			&jackpot.LastWinTime,
 			&jackpot.UpdatedAt,
-		)
-		if err != nil {
+		); err != nil {
 			log.Printf("Failed to scan jackpot: %v", err)
 			continue
 		}
-
 		jackpot.Type = JackpotType(jackpotType)
-		jm.jackpots[jackpot.Type] = &jackpot
-		loadedCount++
+		temp[jackpot.Type] = &jackpot
+		loaded++
 	}
 
-	// Save any missing default jackpots
-	if loadedCount == 0 {
-		log.Println("[jackpot] No jackpots found in DB; saving defaults")
+	if loaded == 0 { // nothing persisted yet; write defaults
+		log.Println("[jackpot] No jackpots found in DB; saving defaults (no rows loaded)")
 		if err := jm.saveDefaultJackpots(); err != nil {
 			return err
 		}
@@ -170,7 +163,14 @@ func (jm *JackpotManager) loadJackpots() error {
 		return nil
 	}
 
-	log.Printf("Loaded %d jackpots from database", loadedCount)
+	// Swap in loaded jackpots
+	jm.mutex.Lock()
+	for k, v := range temp {
+		jm.jackpots[k] = v
+	}
+	jm.mutex.Unlock()
+
+	log.Printf("Loaded %d jackpots from database", loaded)
 	jm.logRowCount()
 	return nil
 }
@@ -208,6 +208,7 @@ func (jm *JackpotManager) initializeDefaultJackpots() {
 
 // saveDefaultJackpots saves default jackpots to database
 func (jm *JackpotManager) saveDefaultJackpots() error {
+	log.Println("[jackpot] saveDefaultJackpots start")
 	if DB == nil {
 		log.Println("[jackpot] DB nil; skipping saveDefaultJackpots (running in memory-only mode)")
 		return nil
