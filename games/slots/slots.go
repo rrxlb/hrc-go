@@ -43,13 +43,14 @@ const (
 // Game represents a slots session
 type Game struct {
 	*utils.BaseGame
-	Session   *discordgo.Session
-	Reels     [][]string
-	MessageID string
-	ChannelID string
-	Phase     phase
-	BetNote   string
-	Rand      *rand.Rand
+	Session      *discordgo.Session
+	Reels        [][]string
+	MessageID    string
+	ChannelID    string
+	Phase        phase
+	BetNote      string
+	Rand         *rand.Rand
+	UsedOriginal bool // true if using original interaction message instead of followup
 }
 
 // RegisterSlotsCommand config
@@ -103,9 +104,24 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, adjusted)
 	}
 
-	// Run play asynchronously so we return control; animation + followups use webhook token
-	go game.play()
-	log.Printf("[slots] launched play goroutine user=%s bet=%d", i.Member.User.ID, adjusted)
+	// Immediately show initial embed by editing original response so user doesn't stay on thinking state
+	initialEmbed := game.buildEmbed("", 0, 0, false, 0)
+	if err := utils.EditOriginalInteraction(s, i, initialEmbed, nil); err != nil {
+		log.Printf("[slots] failed to edit original interaction: %v", err)
+	} else {
+		// Fetch original message to get IDs for animation edits
+		if orig, err := s.InteractionResponse(i.Interaction); err == nil {
+			game.MessageID = orig.ID
+			game.ChannelID = orig.ChannelID
+			game.UsedOriginal = true
+			log.Printf("[slots] using original message id=%s channel=%s", game.MessageID, game.ChannelID)
+		} else {
+			log.Printf("[slots] could not fetch original response: %v", err)
+		}
+	}
+	// Run play synchronously (we already deferred; no 3s pressure now)
+	game.play()
+	log.Printf("[slots] play completed user=%s bet=%d", i.Member.User.ID, adjusted)
 }
 
 // normalize bet to multiple of paylines
@@ -142,35 +158,18 @@ func (g *Game) play() {
 		}
 		return 0
 	}())
-
-	embed := g.buildEmbed("", 0, 0, false, 0)
-	msg, err := g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Embeds: []*discordgo.MessageEmbed{embed}})
-	if err != nil {
-		log.Printf("[slots] followup create failed: %v (attempting edit original)", err)
-		// Fallback: edit original interaction response
-		if _, editErr := g.Session.InteractionResponseEdit(g.Interaction.Interaction, &discordgo.WebhookEdit{Embeds: &[]*discordgo.MessageEmbed{embed}}); editErr != nil {
-			log.Printf("[slots] edit original also failed: %v", editErr)
+	// If we don't already have a message (e.g., original edit failed), attempt a followup now
+	if g.MessageID == "" || g.ChannelID == "" {
+		log.Printf("[slots] no message id yet; creating followup")
+		embed := g.buildEmbed("", 0, 0, false, 0)
+		msg, err := g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Embeds: []*discordgo.MessageEmbed{embed}})
+		if err != nil {
+			log.Printf("[slots] followup still failed: %v", err)
 			return
-		} else {
-			log.Printf("[slots] fallback edit original succeeded")
-			// Try to fetch original to get ID (not strictly needed for animation; skip animation if no ID)
-			orig, getErr := g.Session.InteractionResponse(g.Interaction.Interaction)
-			if getErr == nil {
-				g.MessageID = orig.ID
-				g.ChannelID = orig.ChannelID
-			} else {
-				log.Printf("[slots] could not fetch original response: %v", getErr)
-			}
 		}
-	} else {
 		g.MessageID = msg.ID
 		g.ChannelID = msg.ChannelID
-		log.Printf("[slots] followup message created id=%s channel=%s", g.MessageID, g.ChannelID)
-	}
-
-	if g.MessageID == "" || g.ChannelID == "" {
-		log.Printf("[slots] missing message identifiers; aborting animation")
-		return
+		log.Printf("[slots] obtained message via followup id=%s", g.MessageID)
 	}
 	final := g.createReels()
 	log.Printf("[slots] reels generated user=%d symbols=%s", g.UserID, formatReels(final))
