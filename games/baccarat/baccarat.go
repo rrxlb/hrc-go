@@ -181,7 +181,7 @@ func (g *Game) play() {
 		if winner == "tie" {
 			return "It's a Tie!"
 		}
-		return strings.Title(winner) + " wins!"
+		return capitalize(winner) + " wins!"
 	}()
 	g.Profit = profit
 }
@@ -234,12 +234,18 @@ func baccaratResultEmbed(g *Game, newBalance int64, xpGain int64) *discordgo.Mes
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: fmt.Sprintf("Player's Hand - %d", g.PlayerScore), Value: joinCards(g.PlayerHand), Inline: false})
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: fmt.Sprintf("Banker's Hand - %d", g.BankerScore), Value: joinCards(g.BankerHand), Inline: false})
 	// Outcome field
-	betSide := strings.Title(g.Choice)
+	betSide := capitalize(g.Choice)
 	lines := []string{fmt.Sprintf("You bet on %s.", betSide), g.ResultText}
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: strings.Join(lines, "\n"), Inline: false})
 	// Profit / Loss field naming
 	if g.Profit > 0 {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Profit", Value: fmt.Sprintf("+%s %s", utils.FormatChips(g.Profit), utils.ChipsEmoji), Inline: false})
+		profitVal := fmt.Sprintf("+%s %s", utils.FormatChips(g.Profit), utils.ChipsEmoji)
+		// Show commission detail for banker wins
+		if g.Choice == "banker" && strings.Contains(strings.ToLower(g.ResultText), "banker wins") {
+			commission := int64(float64(g.Bet) * utils.BaccaratBankerCommission)
+			profitVal += fmt.Sprintf(" (5%% commission: -%s)", utils.FormatChips(commission))
+		}
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Profit", Value: profitVal, Inline: false})
 	} else if g.Profit < 0 {
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Losses", Value: fmt.Sprintf("%s %s", utils.FormatChips(-g.Profit), utils.ChipsEmoji), Inline: false})
 	} else {
@@ -265,4 +271,14 @@ func inIntSlice(v int, list []int) bool {
 		}
 	}
 	return false
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	if len(s) == 1 {
+		return strings.ToUpper(s)
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
