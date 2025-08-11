@@ -166,10 +166,12 @@ func (jm *JackpotManager) loadJackpots() error {
 			return err
 		}
 		log.Println("[jackpot] Default jackpots saved")
+		jm.logRowCount()
 		return nil
 	}
 
 	log.Printf("Loaded %d jackpots from database", loadedCount)
+	jm.logRowCount()
 	return nil
 }
 
@@ -216,6 +218,7 @@ func (jm *JackpotManager) saveDefaultJackpots() error {
 	defer jm.mutex.RUnlock()
 
 	for _, jackpot := range jm.jackpots {
+		log.Printf("[jackpot] inserting jackpot type=%s seed=%d amount=%d rate=%.4f", jackpot.Type, jackpot.SeedAmount, jackpot.Amount, jackpot.ContributionRate)
 		query := `
 			INSERT INTO jackpots (type, amount, seed_amount, contribution_rate, updated_at)
 			VALUES ($1, $2, $3, $4, $5)
@@ -243,7 +246,23 @@ func (jm *JackpotManager) saveDefaultJackpots() error {
 	}
 
 	log.Printf("[jackpot] Saved %d default jackpots to database", len(jm.jackpots))
+	jm.logRowCount()
 	return nil
+}
+
+// logRowCount prints current jackpot row count for diagnostics
+func (jm *JackpotManager) logRowCount() {
+	if DB == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var cnt int
+	if err := DB.QueryRow(ctx, "SELECT COUNT(*) FROM jackpots").Scan(&cnt); err != nil {
+		log.Printf("[jackpot] row count query error: %v", err)
+		return
+	}
+	log.Printf("[jackpot] jackpots table row count=%d", cnt)
 }
 
 // ContributeToJackpot adds a contribution to the specified jackpot
