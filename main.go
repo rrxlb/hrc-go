@@ -14,6 +14,7 @@ import (
 
 	baccarat "hrc-go/games/baccarat"
 	blackjack "hrc-go/games/blackjack"
+	craps "hrc-go/games/craps"
 	roulette "hrc-go/games/roulette"
 	threecardpoker "hrc-go/games/three_card_poker"
 	"hrc-go/utils"
@@ -232,6 +233,7 @@ func registerSlashCommands(s *discordgo.Session) error {
 		},
 		blackjack.RegisterBlackjackCommands(),
 		baccarat.RegisterBaccaratCommand(),
+		craps.RegisterCrapsCommand(),
 		roulette.RegisterRouletteCommand(),
 		threecardpoker.RegisterThreeCardPokerCommand(),
 	}
@@ -273,6 +275,8 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			blackjack.HandleBlackjackCommand(s, i)
 		case "baccarat":
 			baccarat.HandleBaccaratCommand(s, i)
+		case "craps":
+			craps.HandleCrapsCommand(s, i)
 		case "roulette":
 			roulette.HandleRouletteCommand(s, i)
 		case "tcpoker":
@@ -284,6 +288,9 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.Type == discordgo.InteractionModalSubmit {
 		if strings.HasPrefix(i.ModalSubmitData().CustomID, "roulette_bet_modal_") {
 			roulette.HandleRouletteModal(s, i)
+		}
+		if strings.HasPrefix(i.ModalSubmitData().CustomID, "craps_bet_modal_") {
+			craps.HandleCrapsModal(s, i)
 		}
 	}
 }
@@ -306,6 +313,10 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	if strings.HasPrefix(customID, "baccarat_") {
 		baccarat.HandleBaccaratButton(s, i)
+	}
+
+	if strings.HasPrefix(customID, "craps_") {
+		craps.HandleCrapsButton(s, i)
 	}
 
 	if strings.HasPrefix(customID, "tcp_") {
