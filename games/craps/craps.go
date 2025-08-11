@@ -457,7 +457,8 @@ func (g *Game) buildEmbed(outcome, rollDisplay string) *discordgo.MessageEmbed {
 	if len(statusParts) > 0 {
 		status = "(" + strings.Join(statusParts, ", ") + ") "
 	}
-	header := fmt.Sprintf("%sPoint: %s | Net %s %s", status, pointStr, ternary(g.SessionProfit >= 0, "Profit", "Loss"), utils.FormatChips(abs64(g.SessionProfit)))
+	netWord := ternary(g.SessionProfit >= 0, "Profit", "Loss")
+	header := fmt.Sprintf("%s**Point:** %s  •  **Net %s:** %s", status, pointStr, netWord, utils.FormatChips(abs64(g.SessionProfit)))
 	embed := utils.CreateBrandedEmbed(title, header+"\n"+layout, color)
 	fields := []*discordgo.MessageEmbedField{}
 	if rollDisplay != "" {
@@ -572,9 +573,8 @@ func (g *Game) betSummary() string {
 }
 
 func (g *Game) layoutString() string {
-	// Top numbers with markers: * for point, P for place bet
 	nums := []int{4, 5, 6, 8, 9, 10}
-	top := []string{}
+	top := make([]string, 0, len(nums))
 	for _, n := range nums {
 		mark := ""
 		if g.Point != nil && *g.Point == n {
@@ -583,59 +583,51 @@ func (g *Game) layoutString() string {
 		if _, ok := g.Bets[fmt.Sprintf("place_%d", n)]; ok {
 			mark += "P"
 		}
-		cell := fmt.Sprintf("[%d% s]", n, mark)
-		cell = strings.ReplaceAll(cell, "% s", mark) // tidy spacing
-		// Normalize bracket if no mark
-		cell = strings.Replace(cell, "% ", "", -1)
-		top = append(top, cell)
+		if mark == "" {
+			top = append(top, fmt.Sprintf("[%d]", n))
+			continue
+		}
+		top = append(top, fmt.Sprintf("[%d%s]", n, mark))
 	}
-	line := strings.Repeat("_", 55)
-	passParts := []string{}
-	if v, ok := g.Bets["pass_line"]; ok {
-		passParts = append(passParts, fmt.Sprintf("Pass Line: %s", utils.FormatChips(v)))
+	line := strings.Repeat("─", 58)
+	withAmt := func(key, label string) string {
+		if v, ok := g.Bets[key]; ok {
+			return fmt.Sprintf("%s: %s", label, utils.FormatChips(v))
+		}
+		return ""
 	}
-	if _, ok := g.Bets["come"]; ok {
-		passParts = append(passParts, "Come")
+	passSegs := []string{}
+	if s := withAmt("pass_line", "Pass Line"); s != "" {
+		passSegs = append(passSegs, s)
 	}
-	if _, ok := g.Bets["field"]; ok {
-		passParts = append(passParts, "Field")
+	if s := withAmt("come", "Come"); s != "" {
+		passSegs = append(passSegs, s)
 	}
-	passLine := ""
-	if len(passParts) > 0 {
-		passLine = strings.Join(passParts, " | ")
+	if s := withAmt("field", "Field"); s != "" {
+		passSegs = append(passSegs, s)
 	}
-	dontParts := []string{}
-	if _, ok := g.Bets["dont_pass"]; ok {
-		dontParts = append(dontParts, "Don't Pass")
+	dontSegs := []string{}
+	if s := withAmt("dont_pass", "Don't Pass"); s != "" {
+		dontSegs = append(dontSegs, s)
 	}
-	if _, ok := g.Bets["dont_come"]; ok {
-		dontParts = append(dontParts, "Don't Come")
+	if s := withAmt("dont_come", "Don't Come"); s != "" {
+		dontSegs = append(dontSegs, s)
 	}
-	dontLine := ""
-	if len(dontParts) > 0 {
-		dontLine = strings.Join(dontParts, " | ")
-	}
-	// Hard ways summary inline markers
 	hardParts := []string{}
 	for _, h := range []int{4, 6, 8, 10} {
-		key := fmt.Sprintf("hard_%d", h)
-		if amt, ok := g.Bets[key]; ok {
-			hardParts = append(hardParts, fmt.Sprintf("H%d:%s", h, utils.FormatChips(amt)))
+		if amt, ok := g.Bets[fmt.Sprintf("hard_%d", h)]; ok {
+			hardParts = append(hardParts, fmt.Sprintf("Hard %d: %s", h, utils.FormatChips(amt)))
 		}
 	}
-	hardLine := strings.Join(hardParts, " | ")
-	sections := []string{
-		strings.Join(top, " "),
-		line,
+	sections := []string{strings.Join(top, " "), line}
+	if len(passSegs) > 0 {
+		sections = append(sections, strings.Join(passSegs, " | "), line)
 	}
-	if passLine != "" {
-		sections = append(sections, passLine, line)
+	if len(dontSegs) > 0 {
+		sections = append(sections, strings.Join(dontSegs, " | "), line)
 	}
-	if dontLine != "" {
-		sections = append(sections, dontLine, line)
-	}
-	if hardLine != "" {
-		sections = append(sections, hardLine)
+	if len(hardParts) > 0 {
+		sections = append(sections, strings.Join(hardParts, " | "))
 	}
 	return "`" + strings.Join(sections, "\n") + "`"
 }
@@ -698,12 +690,30 @@ func HandleCrapsModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	betType := strings.TrimPrefix(custom, "craps_bet_modal_")
 	var amountStr string
-	for _, row := range i.ModalSubmitData().Components {
-		if ar, ok := row.(discordgo.ActionsRow); ok {
-			for _, comp := range ar.Components {
-				if input, ok := comp.(*discordgo.TextInput); ok && input.CustomID == "bet_amount" {
-					amountStr = input.Value
+	for _, row := range i.ModalSubmitData().Components { // robust extraction
+		ar, ok := row.(discordgo.ActionsRow)
+		if !ok {
+			continue
+		}
+		for _, comp := range ar.Components {
+			if input, ok := comp.(*discordgo.TextInput); ok && input.CustomID == "bet_amount" {
+				amountStr = strings.TrimSpace(input.Value)
+			}
+		}
+	}
+	// Fallback: first text input if custom id mismatch
+	if amountStr == "" {
+		for _, row := range i.ModalSubmitData().Components {
+			if ar, ok := row.(discordgo.ActionsRow); ok {
+				for _, comp := range ar.Components {
+					if input, ok := comp.(*discordgo.TextInput); ok {
+						amountStr = strings.TrimSpace(input.Value)
+						break
+					}
 				}
+			}
+			if amountStr != "" {
+				break
 			}
 		}
 	}
@@ -718,7 +728,11 @@ func HandleCrapsModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	amt, err := utils.ParseBet(amountStr, user.Chips)
 	if err != nil || amt <= 0 {
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", "Invalid bet amount.", 0xFF0000), nil, true)
+		msg := "Invalid bet amount."
+		if err != nil {
+			msg = err.Error()
+		}
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", msg, 0xFF0000), nil, true)
 		return
 	}
 	if err := game.addBet(betType, amt); err != nil {
