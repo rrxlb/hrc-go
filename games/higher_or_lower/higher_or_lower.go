@@ -299,7 +299,8 @@ func (g *Game) buildEmbed(state string, outcomeText string, won bool) *discordgo
 	} else if state == "result" {
 		if g.NextCard != nil {
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Previous Card", Value: fmt.Sprintf("`%s`", g.CurrentCard.String()), Inline: true})
-			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Next Card", Value: fmt.Sprintf("`%s`", g.NextCard.String()), Inline: true})
+			// Show newly revealed as the upcoming current card
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Current Card", Value: fmt.Sprintf("`%s`", g.NextCard.String()), Inline: true})
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "\u200b", Value: "\u200b", Inline: true})
 		}
 	} else if state == "final" {
@@ -314,7 +315,12 @@ func (g *Game) buildEmbed(state string, outcomeText string, won bool) *discordgo
 	if math.Mod(g.currentMultiplier(), 1.0) == 0 {
 		multStr = fmt.Sprintf("x%.0f", g.currentMultiplier())
 	}
-	gameInfo := fmt.Sprintf("**Streak:** 🔥 %d wins\n**Multiplier:** `%s`\n**Current Winnings:** %s %s", g.Streak, multStr, utils.FormatChips(g.currentWinnings()), utils.ChipsEmoji)
+	var gameInfo string
+	if state == "final" {
+		gameInfo = fmt.Sprintf("**Streak:** 🔥 %d wins\n**Multiplier:** `%s`", g.Streak, multStr)
+	} else {
+		gameInfo = fmt.Sprintf("**Streak:** 🔥 %d wins\n**Multiplier:** `%s`\n**Current Winnings:** %s %s", g.Streak, multStr, utils.FormatChips(g.currentWinnings()), utils.ChipsEmoji)
+	}
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Game Info", Value: gameInfo, Inline: false})
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Initial Bet", Value: fmt.Sprintf("%s %s", utils.FormatChips(g.Bet), utils.ChipsEmoji), Inline: false})
 
