@@ -190,28 +190,32 @@ func (g *Game) play() {
 	log.Printf("[slots] results calculated winnings=%d jackpotLine=%v", totalWinnings, jackpotLine)
 	jackpotPayout := int64(0)
 	if jackpotLine && utils.JackpotMgr != nil {
-		won, amount, _ := utils.JackpotMgr.TryWinJackpot(utils.JackpotSlots, g.UserID, g.Bet, 1.0) // guarantee on line
+		won, amount, _ := utils.JackpotMgr.TryWinJackpot(utils.JackpotSlots, g.UserID, g.Bet, 1.0)
 		if won {
 			jackpotPayout = amount
 			totalWinnings += amount
 		}
 	}
 	profit := totalWinnings - g.Bet
+	// Pre-compute new balance locally (avoid DB wait before showing user)
+	preBalance := int64(0)
+	if g.BaseGame.UserData != nil {
+		preBalance = g.BaseGame.UserData.Chips
+	}
+	newBalance := preBalance + profit
 	if profit < 0 && utils.JackpotMgr != nil {
 		loss := -profit
-		utils.JackpotMgr.AddJackpotAmount(utils.JackpotSlots, int64(float64(loss)*jackpotLossContributionRate))
+		go func(l int64) {
+			recover()
+			utils.JackpotMgr.AddJackpotAmount(utils.JackpotSlots, int64(float64(l)*jackpotLossContributionRate))
+		}(loss)
 	}
-	updatedUser, _ := g.EndGame(profit)
 	xpGain := int64(0)
 	if profit > 0 {
 		xpGain = profit * utils.XPPerProfit
 	}
+	// We'll fetch jackpot amount asynchronously; placeholder now
 	jackpotAmount := int64(0)
-	if utils.JackpotMgr != nil {
-		if j, err := utils.JackpotMgr.GetJackpotAmount(utils.JackpotSlots); err == nil {
-			jackpotAmount = j
-		}
-	}
 	outcome := "No wins this time. Better luck next time!"
 	if totalWinnings > 0 {
 		outcome = fmt.Sprintf("Congratulations! You won %s chips!", utils.FormatChips(totalWinnings))
@@ -222,29 +226,57 @@ func (g *Game) play() {
 	g.Phase = phaseFinal
 	finalEmbed := g.buildEmbed(formatReels(g.Reels), totalWinnings, xpGain, true, jackpotAmount)
 	finalEmbed.Fields = append(finalEmbed.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: outcome, Inline: false})
-	// Append New Balance at end
-	finalEmbed.Fields = append(finalEmbed.Fields, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", utils.FormatChips(updatedUser.Chips), utils.ChipsEmoji), Inline: false})
-	// Jackpot color override
+	finalEmbed.Fields = append(finalEmbed.Fields, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", utils.FormatChips(newBalance), utils.ChipsEmoji), Inline: false})
 	if jackpotPayout > 0 {
 		finalEmbed.Color = 0xFFD700
 	}
 	components := []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{utils.CreateButton("slots_spin_again_"+g.MessageID, "Spin Again", discordgo.SuccessButton, false, nil)}}}
-	// Edit followup message (not original interaction)
 	embeds := []*discordgo.MessageEmbed{finalEmbed}
 	if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds, Components: &components}); err != nil {
-		log.Printf("[slots] final edit failed: %v", err)
+		log.Printf("[slots] final (pre-DB) edit failed: %v", err)
 	} else {
-		log.Printf("[slots] final edit success user=%d duration=%dms", g.UserID, time.Since(playStart).Milliseconds())
+		log.Printf("[slots] final (pre-DB) edit success user=%d duration=%dms", g.UserID, time.Since(playStart).Milliseconds())
 	}
 	if g.BetNote != "" {
 		g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Content: g.BetNote, Flags: discordgo.MessageFlagsEphemeral})
 	}
 
-	// Rank-up ephemeral notice
-	afterRank := getRankForXP(updatedUser.TotalXP)
-	if beforeRank.Name != "" && afterRank.Name != "" && afterRank.Name != beforeRank.Name {
-		g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Embeds: []*discordgo.MessageEmbed{utils.CreateBrandedEmbed("🎊 Rank Up!", fmt.Sprintf("%s %s → %s %s", beforeRank.Icon, beforeRank.Name, afterRank.Icon, afterRank.Name), 0xFFD700)}, Flags: discordgo.MessageFlagsEphemeral})
-	}
+	// Async finalize DB + jackpot amount + rank-up
+	go func(profit, xpGain int64, before utils.Rank) {
+		defer func() { recover() }()
+		updatedUser, err := g.EndGame(profit)
+		if err != nil {
+			log.Printf("[slots] EndGame error: %v", err)
+			return
+		}
+		var jackpotAmt int64 = 0
+		if utils.JackpotMgr != nil {
+			if j, e := utils.JackpotMgr.GetJackpotAmount(utils.JackpotSlots); e == nil {
+				jackpotAmt = j
+			}
+		}
+		// Patch embed with real jackpot amount if zero before
+		if jackpotAmt > 0 {
+			// Re-fetch message (optional)
+			finalEmbed2 := g.buildEmbed(formatReels(g.Reels), totalWinnings, xpGain, true, jackpotAmt)
+			finalEmbed2.Fields = append(finalEmbed2.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: outcome, Inline: false})
+			finalEmbed2.Fields = append(finalEmbed2.Fields, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", utils.FormatChips(updatedUser.Chips), utils.ChipsEmoji), Inline: false})
+			if jackpotPayout > 0 {
+				finalEmbed2.Color = 0xFFD700
+			}
+			embeds2 := []*discordgo.MessageEmbed{finalEmbed2}
+			if _, e := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds2, Components: &components}); e != nil {
+				log.Printf("[slots] post-DB jackpot embed edit failed: %v", e)
+			} else {
+				log.Printf("[slots] post-DB jackpot embed edit success")
+			}
+		}
+		afterRank := getRankForXP(updatedUser.TotalXP)
+		if before.Name != "" && afterRank.Name != "" && afterRank.Name != before.Name {
+			g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Embeds: []*discordgo.MessageEmbed{utils.CreateBrandedEmbed("🎊 Rank Up!", fmt.Sprintf("%s %s → %s %s", before.Icon, before.Name, afterRank.Icon, afterRank.Name), 0xFFD700)}, Flags: discordgo.MessageFlagsEphemeral})
+		}
+		log.Printf("[slots] async finalize complete")
+	}(profit, xpGain, beforeRank)
 }
 
 func getRandomSymbol(r *rand.Rand) string {
@@ -401,7 +433,9 @@ func (g *Game) animateSpin(final [][]string) {
 		reelsTxt := formatReels(frame)
 		embed := g.buildEmbed(reelsTxt, 0, 0, false, 0)
 		embeds := []*discordgo.MessageEmbed{embed}
-		g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds})
+		if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds}); err != nil {
+			log.Printf("[slots] animation edit step=%d err=%v", step, err)
+		}
 		t := float64(step) / float64(spinFrames)
 		delay := 0.06 + (0.18-0.06)*(t*t)
 		time.Sleep(time.Duration(delay*1000) * time.Millisecond)
