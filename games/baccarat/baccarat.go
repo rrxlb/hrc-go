@@ -95,10 +95,14 @@ func HandleBaccaratButton(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Baccarat", "Invalid selection.", 0xFF0000), nil, true)
 		return
 	}
-	// Run game
-	game.play()
-	// Finish and edit original message
-	game.finishWithEdit(s, i)
+	// Acknowledge immediately to avoid 3s timeout
+	_ = utils.AcknowledgeComponentInteraction(s, i)
+
+	// Process game logic asynchronously (fast enough but keep responsive)
+	go func(g *Game, inter *discordgo.InteractionCreate) {
+		g.play()
+		g.finishAfterAck(s, inter)
+	}(game, i)
 }
 
 func (g *Game) baccaratValue(c utils.Card) int { return c.GetValue("baccarat") }
@@ -186,7 +190,8 @@ func (g *Game) play() {
 	g.Profit = profit
 }
 
-func (g *Game) finishWithEdit(s *discordgo.Session, i *discordgo.InteractionCreate) {
+// finishAfterAck finalizes game after a deferred (acknowledged) component interaction
+func (g *Game) finishAfterAck(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	g.Finished = true
 	updatedUser, _ := g.BaseGame.EndGame(g.Profit)
 	var xpGain int64
@@ -194,14 +199,15 @@ func (g *Game) finishWithEdit(s *discordgo.Session, i *discordgo.InteractionCrea
 		xpGain = g.Profit * utils.XPPerProfit
 	}
 	embed := baccaratResultEmbed(g, updatedUser.Chips, xpGain)
-	// Disable buttons
 	components := []discordgo.MessageComponent{utils.CreateActionRow(
 		utils.CreateButton("baccarat_player", "Player", discordgo.SuccessButton, true, &discordgo.ComponentEmoji{Name: ""}),
 		utils.CreateButton("baccarat_banker", "Banker", discordgo.DangerButton, true, &discordgo.ComponentEmoji{Name: ""}),
 		utils.CreateButton("baccarat_tie", "Tie", discordgo.SecondaryButton, true, &discordgo.ComponentEmoji{Name: ""}),
 	)}
-	// Respond to the component interaction (required to avoid 'interaction failed')
-	_ = utils.UpdateComponentInteraction(s, i, embed, components)
+	// Edit original message (component interaction already acknowledged)
+	embeds := []*discordgo.MessageEmbed{embed}
+	edit := &discordgo.MessageEdit{ID: i.Message.ID, Channel: i.ChannelID, Embeds: &embeds, Components: &components}
+	_, _ = s.ChannelMessageEditComplex(edit)
 	delete(activeBaccaratGames, g.UserID)
 }
 
