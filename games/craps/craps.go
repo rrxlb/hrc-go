@@ -550,11 +550,11 @@ func (g *Game) components() []discordgo.MessageComponent {
 		sm.Disabled = betDisabled
 		menuComp = sm
 	}
-	row := utils.CreateActionRow(
+	rowRoll := utils.CreateActionRow(
 		utils.CreateButton("craps_roll", "Roll", discordgo.SuccessButton, false, &discordgo.ComponentEmoji{Name: "🎲"}),
-		menuComp,
 	)
-	return []discordgo.MessageComponent{row}
+	rowMenu := utils.CreateActionRow(menuComp)
+	return []discordgo.MessageComponent{rowRoll, rowMenu}
 }
 
 // updateMessage updates or edits interaction message after a roll or bet
