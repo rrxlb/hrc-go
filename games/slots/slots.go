@@ -352,57 +352,71 @@ func getRankForXP(xp int64) utils.Rank {
 	return current
 }
 
-// buildEmbed constructs embed with parity to Python create_slots_embed
+// buildEmbed constructs a compact embed layout
+// mode: "initial", "spinning", "final"
 func (g *Game) buildEmbed(reels string, winnings int64, xpGain int64, final bool, jackpotAmount int64) *discordgo.MessageEmbed {
-	var title, description string
-	var color int
-
+	mode := "spinning"
 	if !final {
-		if reels == "" { // initial
-			title = "Slot Machine"
-			description = "Spinning the reels..."
-			color = 0x3498db // blue
-		} else { // spinning frame
-			title = "Slot Machine"
-			description = fmt.Sprintf("Spinning the reels...\n\n%s", reels)
-			color = 0x3498db
+		if reels == "" {
+			mode = "initial"
 		}
-	} else { // final
-		title = "Slot Machine Results"
-		description = reels
+	} else {
+		mode = "final"
+	}
+
+	title := "🎰 Slot Machine"
+	if mode == "final" {
+		title = "🎰 Slot Machine Results"
+	}
+
+	color := 0x3498db
+	if mode == "final" {
 		if winnings > 0 {
-			color = 0x2ecc71 // green for win
+			color = 0x2ecc71
 		} else {
-			color = 0xe74c3c // red for loss
+			color = 0xe74c3c
 		}
 	}
 
-	embed := utils.CreateBrandedEmbed(title, description, color)
-	// Thumbnail parity (slots icon)
+	// Reels inside a code block for tight spacing
+	desc := ""
+	switch mode {
+	case "initial":
+		desc = "Spinning the reels..."
+	case "spinning":
+		desc = fmt.Sprintf("Spinning the reels...\n````\n%s\n````", reels)
+	case "final":
+		desc = fmt.Sprintf("````\n%s\n````", reels)
+	}
+
+	embed := utils.CreateBrandedEmbed(title, desc, color)
 	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753050867/SL_d8ophs.png"}
 
-	if final {
-		// Spacer field
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "\u200b", Value: "\u200b", Inline: false})
-		// Jackpot field (always show current amount for visibility)
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Jackpot", Value: fmt.Sprintf("%s %s", utils.FormatChips(jackpotAmount), utils.ChipsEmoji), Inline: true})
-		// Bet field (needed for Spin Again parsing)
+	if mode == "final" {
+		summary := fmt.Sprintf("Bet: %s %s", utils.FormatChips(g.Bet), utils.ChipsEmoji)
+		if winnings > 0 {
+			summary += fmt.Sprintf(" • Win: %s %s", utils.FormatChips(winnings), utils.ChipsEmoji)
+		}
+		summary += fmt.Sprintf(" • Jackpot: %s %s", utils.FormatChips(jackpotAmount), utils.ChipsEmoji)
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Summary", Value: summary, Inline: false})
+		// Keep Bet field for spin again parsing (hidden in summary otherwise). Inline minimal.
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Bet", Value: fmt.Sprintf("%s %s", utils.FormatChips(g.Bet), utils.ChipsEmoji), Inline: true})
 		if winnings > 0 {
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Winnings", Value: fmt.Sprintf("%s %s", utils.FormatChips(winnings), utils.ChipsEmoji), Inline: true})
-			if xpGain > 0 { // XP gating simplified: always show
-				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP Gained", Value: fmt.Sprintf("+%s XP", utils.FormatChips(xpGain)), Inline: true})
-			}
+		}
+		if xpGain > 0 {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP", Value: fmt.Sprintf("+%s", utils.FormatChips(xpGain)), Inline: true})
 		}
 		embed.Footer = &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("You bet %s chips.", utils.FormatChips(g.Bet))}
 	}
-
 	return embed
 }
 
 func (g *Game) animateSpin(final [][]string) {
 	g.Phase = phaseSpinning
-	stripLen := 21
+	totalFrames := 18
+	stopCol := []int{10, 14, 18} // column stop frames
+	stripLen := 30
 	strips := make([][]string, 3)
 	for c := 0; c < 3; c++ {
 		col := make([]string, stripLen)
@@ -412,33 +426,31 @@ func (g *Game) animateSpin(final [][]string) {
 		strips[c] = col
 	}
 	idx := []int{0, 0, 0}
-	stopSteps := []int{int(spinFrames * 6 / 10), int(spinFrames * 8 / 10), spinFrames}
-	for step := 1; step <= spinFrames; step++ {
+	for frameN := 1; frameN <= totalFrames; frameN++ {
 		frame := make([][]string, 3)
 		for r := 0; r < 3; r++ {
 			frame[r] = make([]string, 3)
 		}
 		for c := 0; c < 3; c++ {
-			var colSyms []string
-			if step < stopSteps[c] {
-				colSyms = []string{strips[c][(idx[c])%stripLen], strips[c][(idx[c]+1)%stripLen], strips[c][(idx[c]+2)%stripLen]}
+			var symbolsCol []string
+			if frameN < stopCol[c] {
+				symbolsCol = []string{strips[c][(idx[c])%stripLen], strips[c][(idx[c]+1)%stripLen], strips[c][(idx[c]+2)%stripLen]}
 				idx[c] = (idx[c] + 1) % stripLen
 			} else {
-				colSyms = []string{final[0][c], final[1][c], final[2][c]}
+				symbolsCol = []string{final[0][c], final[1][c], final[2][c]}
 			}
 			for r := 0; r < 3; r++ {
-				frame[r][c] = colSyms[r]
+				frame[r][c] = symbolsCol[r]
 			}
 		}
 		reelsTxt := formatReels(frame)
 		embed := g.buildEmbed(reelsTxt, 0, 0, false, 0)
 		embeds := []*discordgo.MessageEmbed{embed}
 		if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds}); err != nil {
-			log.Printf("[slots] animation edit step=%d err=%v", step, err)
+			log.Printf("[slots] anim edit frame=%d err=%v", frameN, err)
 		}
-		t := float64(step) / float64(spinFrames)
-		delay := 0.06 + (0.18-0.06)*(t*t)
-		time.Sleep(time.Duration(delay*1000) * time.Millisecond)
+		// Fixed per-frame delay for smoother pacing
+		time.Sleep(110 * time.Millisecond)
 	}
 }
 
@@ -477,17 +489,20 @@ func HandleSlotsInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet must be at least %d and divisible by %d.", minBet, payLines), 0xFF0000), nil, true)
 		return
 	}
-	// Acknowledge and remove buttons
-	utils.AcknowledgeComponentInteraction(s, i)
-	s.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: i.Message.ID, Channel: i.ChannelID, Components: &[]discordgo.MessageComponent{}})
-	game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, Rand: rand.New(rand.NewSource(time.Now().UnixNano()))}
+	// Update message immediately to spinning state (component update) and reuse same message
+	spinning := utils.CreateBrandedEmbed("🎰 Slot Machine", "Spinning the reels...", 0x3498db)
+	if err := utils.UpdateComponentInteraction(s, i, spinning, []discordgo.MessageComponent{}); err != nil {
+		log.Printf("[slots] spin_again update err=%v", err)
+		return
+	}
+	game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, Rand: rand.New(rand.NewSource(time.Now().UnixNano())), MessageID: i.Message.ID, ChannelID: i.ChannelID, UsedOriginal: true}
 	game.BaseGame.CountWinLossMinRatio = 0.20
 	if err := game.ValidateBet(); err != nil {
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", err.Error(), 0xFF0000), nil, true)
+		utils.TryEphemeralFollowup(s, i, err.Error())
 		return
 	}
 	if utils.JackpotMgr != nil {
-		utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, adjusted)
+		go func() { recover(); utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, adjusted) }()
 	}
 	go game.play()
 	if note != "" {
