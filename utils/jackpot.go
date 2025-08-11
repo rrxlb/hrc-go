@@ -212,13 +212,19 @@ func (jm *JackpotManager) saveDefaultJackpots() error {
 		log.Println("[jackpot] DB nil; skipping saveDefaultJackpots (running in memory-only mode)")
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	jm.mutex.RLock()
-	defer jm.mutex.RUnlock()
 
+	// Use write lock because we mutate jackpot.ID fields
+	jm.mutex.Lock()
+	defer jm.mutex.Unlock()
+
+	inserted := 0
 	for _, jackpot := range jm.jackpots {
-		log.Printf("[jackpot] inserting jackpot type=%s seed=%d amount=%d rate=%.4f", jackpot.Type, jackpot.SeedAmount, jackpot.Amount, jackpot.ContributionRate)
+		log.Printf("[jackpot] upserting jackpot type=%s seed=%d amount=%d rate=%.4f", jackpot.Type, jackpot.SeedAmount, jackpot.Amount, jackpot.ContributionRate)
+		if ctx.Err() != nil {
+			return fmt.Errorf("context expired before insert: %w", ctx.Err())
+		}
 		query := `
 			INSERT INTO jackpots (type, amount, seed_amount, contribution_rate, updated_at)
 			VALUES ($1, $2, $3, $4, $5)
@@ -227,27 +233,59 @@ func (jm *JackpotManager) saveDefaultJackpots() error {
 				seed_amount = EXCLUDED.seed_amount,
 				contribution_rate = EXCLUDED.contribution_rate,
 				updated_at = EXCLUDED.updated_at
-			RETURNING id`
-
-		if ctx.Err() != nil {
-			return fmt.Errorf("context expired before insert: %w", ctx.Err())
-		}
+			RETURNING id, amount`
+		var id int
+		var persistedAmount int64
 		err := DB.QueryRow(ctx, query,
 			string(jackpot.Type),
 			jackpot.Amount,
 			jackpot.SeedAmount,
 			jackpot.ContributionRate,
 			jackpot.UpdatedAt,
-		).Scan(&jackpot.ID)
-
+		).Scan(&id, &persistedAmount)
 		if err != nil {
 			return fmt.Errorf("failed to save jackpot %s: %w", jackpot.Type, err)
 		}
+		jackpot.ID = id
+		jackpot.Amount = persistedAmount // ensure memory matches DB
+		inserted++
 	}
-
-	log.Printf("[jackpot] Saved %d default jackpots to database", len(jm.jackpots))
+	log.Printf("[jackpot] Saved/updated %d jackpots (expected=%d)", inserted, len(jm.jackpots))
 	jm.logRowCount()
+	// Extra verification pass
+	jm.ensurePersisted()
 	return nil
+}
+
+// ensurePersisted re-selects jackpots to verify they exist and logs discrepancies.
+func (jm *JackpotManager) ensurePersisted() {
+	if DB == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	rows, err := DB.Query(ctx, `SELECT type, amount FROM jackpots`)
+	if err != nil {
+		log.Printf("[jackpot] ensurePersisted query error: %v", err)
+		return
+	}
+	defer rows.Close()
+	found := map[string]int64{}
+	for rows.Next() {
+		var t string
+		var amt int64
+		if err := rows.Scan(&t, &amt); err != nil {
+			log.Printf("[jackpot] ensurePersisted scan err: %v", err)
+			continue
+		}
+		found[t] = amt
+	}
+	for jt := range jm.jackpots {
+		if _, ok := found[string(jt)]; !ok {
+			log.Printf("[jackpot] ensurePersisted MISSING jackpot type=%s in DB after save", jt)
+		}
+	}
+	log.Printf("[jackpot] ensurePersisted rows=%d detailed=%v", len(found), found)
 }
 
 // logRowCount prints current jackpot row count for diagnostics
@@ -307,10 +345,9 @@ func (jm *JackpotManager) updateJackpotInDB(jackpot *Jackpot) error {
 	query := `
 		UPDATE jackpots 
 		SET amount = $1, last_winner = $2, last_win_amount = $3, 
-		    last_win_time = $4, updated_at = $5
+			last_win_time = $4, updated_at = $5
 		WHERE type = $6`
-
-	_, err := DB.Exec(ctx, query,
+	ct, err := DB.Exec(ctx, query,
 		jackpot.Amount,
 		jackpot.LastWinner,
 		jackpot.LastWinAmount,
@@ -318,8 +355,21 @@ func (jm *JackpotManager) updateJackpotInDB(jackpot *Jackpot) error {
 		jackpot.UpdatedAt,
 		string(jackpot.Type),
 	)
-
-	return err
+	if err != nil {
+		return err
+	}
+	rows := ct.RowsAffected()
+	if rows == 0 {
+		log.Printf("[jackpot] updateJackpotInDB affected 0 rows for type=%s (will attempt insert)", jackpot.Type)
+		// attempt insert (race where row missing)
+		ins := `INSERT INTO jackpots (type, amount, seed_amount, contribution_rate, updated_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (type) DO NOTHING`
+		if _, ierr := DB.Exec(ctx, ins, string(jackpot.Type), jackpot.Amount, jackpot.SeedAmount, jackpot.ContributionRate, jackpot.UpdatedAt); ierr != nil {
+			log.Printf("[jackpot] fallback insert failed for type=%s err=%v", jackpot.Type, ierr)
+		} else {
+			log.Printf("[jackpot] fallback insert success for missing type=%s", jackpot.Type)
+		}
+	}
+	return nil
 }
 
 // TryWinJackpot attempts to win the jackpot based on probability

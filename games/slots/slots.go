@@ -242,6 +242,25 @@ func (g *Game) play() {
 	} else {
 		log.Printf("[slots] final (pre-DB) edit success user=%d duration=%dms", g.UserID, time.Since(playStart).Milliseconds())
 	}
+	// Fallback retry: sometimes the final edit may be lost; re-issue once after short delay if message not in final phase
+	go func(msgID, channelID string, embed *discordgo.MessageEmbed, comps []discordgo.MessageComponent) {
+		time.Sleep(1500 * time.Millisecond)
+		defer func() { recover() }()
+		m, err := g.Session.ChannelMessage(channelID, msgID)
+		if err != nil {
+			log.Printf("[slots] fallback fetch err: %v", err)
+			return
+		}
+		if m != nil && len(m.Embeds) > 0 && strings.Contains(strings.ToLower(m.Embeds[0].Title), "results") {
+			return // already final
+		}
+		embedsRetry := []*discordgo.MessageEmbed{embed}
+		if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: msgID, Channel: channelID, Embeds: &embedsRetry, Components: &comps}); err != nil {
+			log.Printf("[slots] fallback final edit failed: %v", err)
+		} else {
+			log.Printf("[slots] fallback final edit applied")
+		}
+	}(g.MessageID, g.ChannelID, finalEmbed, components)
 	if g.BetNote != "" {
 		g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Content: g.BetNote, Flags: discordgo.MessageFlagsEphemeral})
 	}
