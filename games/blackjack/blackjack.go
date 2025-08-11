@@ -567,7 +567,6 @@ func HandleBlackjackInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
-	log.Printf("Processed blackjack action %s for game %s", customID, game.GameID)
 }
 
 // Helper functions

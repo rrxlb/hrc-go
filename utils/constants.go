@@ -46,8 +46,8 @@ var (
 
 // Blackjack Game Constants
 const (
-	DeckCount             = 6     // Standard shoe size
-	ShuffleThreshold      = 0.25  // Shuffle when 25% of the shoe remains
+	DeckCount             = 6    // Standard shoe size
+	ShuffleThreshold      = 0.25 // Shuffle when 25% of the shoe remains
 	DealerStandValue      = 17
 	BlackjackPayout       = 1.5
 	FiveCardCharliePayout = 1.75
@@ -55,15 +55,15 @@ const (
 
 // Baccarat Game Constants
 const (
-	BaccaratPayout          = 1.0
-	BaccaratTiePayout       = 8.0
+	BaccaratPayout           = 1.0
+	BaccaratTiePayout        = 8.0
 	BaccaratBankerCommission = 0.05
 )
 
 // Poker Game Constants
 var (
 	PokerHandRankings = map[string]int{
-		"high_card":        1,
+		"high_card":       1,
 		"pair":            2,
 		"two_pair":        3,
 		"three_of_a_kind": 4,
@@ -91,20 +91,20 @@ var (
 
 // Betting Limits
 const (
-	MinBuyIn       = 100
-	MinBlindRatio  = 0.01  // Minimum blind as % of buy-in
-	MaxBlindRatio  = 0.1   // Maximum blind as % of buy-in
+	MinBuyIn      = 100
+	MinBlindRatio = 0.01 // Minimum blind as % of buy-in
+	MaxBlindRatio = 0.1  // Maximum blind as % of buy-in
 )
 
 // UI Messages
 const (
-	TimeoutMessage = "You did not respond in time. The interaction has timed out."
-	GameTimeoutMessage = "You did not respond in time. Your game has timed out and you have forfeited your bet of %d <:chips:1396988413151940629>."
-	GameCleanupMessage = "Your game has been removed due to inactivity. You have forfeited your bet of %d <:chips:1396988413151940629>."
-	TopGGVoteLink = "https://top.gg/bot/1396564026233983108/vote"
+	TimeoutMessage     = "You did not respond in time. The interaction has timed out."
+	GameTimeoutMessage = "You did not respond in time. Your game has timed out and you have forfeited your bet of %d <:chips:1404332422451040330>."
+	GameCleanupMessage = "Your game has been removed due to inactivity. You have forfeited your bet of %d <:chips:1404332422451040330>."
+	TopGGVoteLink      = "https://top.gg/bot/1396564026233983108/vote"
 )
 
 // Emojis and Discord Elements
 const (
-	ChipsEmoji = "<:chips:1396988413151940629>"
+	ChipsEmoji = "<:chips:1404332422451040330>"
 )
