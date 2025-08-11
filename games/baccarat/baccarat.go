@@ -32,7 +32,6 @@ func RegisterBaccaratCommand() *discordgo.ApplicationCommand {
 		Description: "Play a game of Baccarat",
 		Options: []*discordgo.ApplicationCommandOption{
 			{Type: discordgo.ApplicationCommandOptionString, Name: "bet", Description: "Bet amount (e.g. 500, 5k, half, all)", Required: true},
-			{Type: discordgo.ApplicationCommandOptionString, Name: "choice", Description: "Bet on player, banker, or tie", Required: true, Choices: []*discordgo.ApplicationCommandOptionChoice{{Name: "Player", Value: "player"}, {Name: "Banker", Value: "banker"}, {Name: "Tie", Value: "tie"}}},
 		},
 	}
 }
@@ -44,18 +43,11 @@ func HandleBaccaratCommand(s *discordgo.Session, i *discordgo.InteractionCreate)
 		return
 	}
 	data := i.ApplicationCommandData()
-	var betStr, choice string
+	var betStr string
 	for _, opt := range data.Options {
-		switch opt.Name {
-		case "bet":
+		if opt.Name == "bet" {
 			betStr = opt.StringValue()
-		case "choice":
-			choice = strings.ToLower(opt.StringValue())
 		}
-	}
-	if choice != "player" && choice != "banker" && choice != "tie" {
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", "Choice must be player, banker, or tie.", 0xFF0000), nil, true)
-		return
 	}
 	user, err := utils.GetCachedUser(userID)
 	if err != nil {
@@ -67,14 +59,46 @@ func HandleBaccaratCommand(s *discordgo.Session, i *discordgo.InteractionCreate)
 		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", "Invalid bet amount.", 0xFF0000), nil, true)
 		return
 	}
-	game := &Game{BaseGame: utils.NewBaseGame(s, i, betAmount, "baccarat"), Choice: choice, Deck: utils.NewDeck(6, "baccarat"), CreatedAt: time.Now()}
+	game := &Game{BaseGame: utils.NewBaseGame(s, i, betAmount, "baccarat"), Deck: utils.NewDeck(6, "baccarat"), CreatedAt: time.Now()}
 	if err := game.BaseGame.ValidateBet(); err != nil {
 		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", err.Error(), 0xFF0000), nil, true)
 		return
 	}
 	activeBaccaratGames[userID] = game
+	// Send selection embed with buttons
+	embed := baccaratStartEmbed(game)
+	components := baccaratChoiceComponents()
+	utils.SendInteractionResponse(s, i, embed, components, false)
+}
+
+// HandleBaccaratButton handles side selection via buttons
+func HandleBaccaratButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	userID, _ := utils.ParseUserID(i.Member.User.ID)
+	game, exists := activeBaccaratGames[userID]
+	if !exists {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Baccarat", "No active baccarat game found.", 0xFF0000), nil, true)
+		return
+	}
+	if game.Finished {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Baccarat", "Game already finished.", 0xFF0000), nil, true)
+		return
+	}
+	choiceID := i.MessageComponentData().CustomID
+	switch choiceID {
+	case "baccarat_player":
+		game.Choice = "player"
+	case "baccarat_banker":
+		game.Choice = "banker"
+	case "baccarat_tie":
+		game.Choice = "tie"
+	default:
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Baccarat", "Invalid selection.", 0xFF0000), nil, true)
+		return
+	}
+	// Run game
 	game.play()
-	game.finish(s)
+	// Finish and edit original message
+	game.finishWithEdit(s, i)
 }
 
 func (g *Game) baccaratValue(c utils.Card) int { return c.GetValue("baccarat") }
@@ -162,21 +186,40 @@ func (g *Game) play() {
 	g.Profit = profit
 }
 
-func (g *Game) finish(s *discordgo.Session) {
+func (g *Game) finishWithEdit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	g.Finished = true
 	updatedUser, _ := g.BaseGame.EndGame(g.Profit)
 	var xpGain int64
 	if g.Profit > 0 {
 		xpGain = g.Profit * utils.XPPerProfit
 	}
-	embed := baccaratEmbed(g, updatedUser.Chips, xpGain)
-	utils.SendInteractionResponse(s, g.Interaction, embed, nil, false)
+	embed := baccaratResultEmbed(g, updatedUser.Chips, xpGain)
+	// Disable buttons
+	components := []discordgo.MessageComponent{utils.CreateActionRow(
+		utils.CreateButton("baccarat_player", "Player", discordgo.SuccessButton, true, &discordgo.ComponentEmoji{Name: ""}),
+		utils.CreateButton("baccarat_banker", "Banker", discordgo.DangerButton, true, &discordgo.ComponentEmoji{Name: ""}),
+		utils.CreateButton("baccarat_tie", "Tie", discordgo.SecondaryButton, true, &discordgo.ComponentEmoji{Name: ""}),
+	)}
+	utils.UpdateInteractionResponse(s, g.Interaction, embed, components)
 	delete(activeBaccaratGames, g.UserID)
 }
 
-func baccaratEmbed(g *Game, newBalance int64, xpGain int64) *discordgo.MessageEmbed {
-	title := "🃏 Baccarat"
-	description := g.ResultText
+// Start phase embed
+func baccaratStartEmbed(g *Game) *discordgo.MessageEmbed {
+	msg := fmt.Sprintf("You are betting %s %s.\nChoose your side.", utils.FormatChips(g.Bet), utils.ChipsEmoji)
+	embed := utils.CreateBrandedEmbed("Baccarat", msg, utils.BotColor)
+	return embed
+}
+
+func baccaratChoiceComponents() []discordgo.MessageComponent {
+	return []discordgo.MessageComponent{utils.CreateActionRow(
+		utils.CreateButton("baccarat_player", "Player", discordgo.SuccessButton, false, nil),
+		utils.CreateButton("baccarat_banker", "Banker", discordgo.DangerButton, false, nil),
+		utils.CreateButton("baccarat_tie", "Tie", discordgo.SecondaryButton, false, nil),
+	)}
+}
+
+func baccaratResultEmbed(g *Game, newBalance int64, xpGain int64) *discordgo.MessageEmbed {
 	color := utils.BotColor
 	if g.Profit > 0 {
 		color = 0x2ECC71
@@ -185,22 +228,24 @@ func baccaratEmbed(g *Game, newBalance int64, xpGain int64) *discordgo.MessageEm
 	} else {
 		color = 0x95A5A6
 	}
-	embed := utils.CreateBrandedEmbed(title, description, color)
-	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753042166/3_vxurig.png"}
-	embed.Fields = []*discordgo.MessageEmbedField{{Name: "Player Hand", Value: fmt.Sprintf("`%s` (%d)", joinCards(g.PlayerHand), g.PlayerScore), Inline: true}, {Name: "Banker Hand", Value: fmt.Sprintf("`%s` (%d)", joinCards(g.BankerHand), g.BankerScore), Inline: true}}
-	profitFieldName := "Result"
-	profitVal := "Push"
+	embed := utils.CreateBrandedEmbed("Baccarat", "", color)
+	embed.Fields = []*discordgo.MessageEmbedField{}
+	// Hands (non-inline, with score in title)
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: fmt.Sprintf("Player's Hand - %d", g.PlayerScore), Value: joinCards(g.PlayerHand), Inline: false})
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: fmt.Sprintf("Banker's Hand - %d", g.BankerScore), Value: joinCards(g.BankerHand), Inline: false})
+	// Outcome field
+	betSide := strings.Title(g.Choice)
+	lines := []string{fmt.Sprintf("You bet on %s.", betSide), g.ResultText}
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: strings.Join(lines, "\n"), Inline: false})
+	// Profit / Loss field naming
 	if g.Profit > 0 {
-		profitFieldName = "Profit"
-		profitVal = fmt.Sprintf("+%s %s", utils.FormatChips(g.Profit), utils.ChipsEmoji)
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Profit", Value: fmt.Sprintf("+%s %s", utils.FormatChips(g.Profit), utils.ChipsEmoji), Inline: false})
 	} else if g.Profit < 0 {
-		profitFieldName = "Loss"
-		profitVal = fmt.Sprintf("%s %s", utils.FormatChips(-g.Profit), utils.ChipsEmoji)
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Losses", Value: fmt.Sprintf("%s %s", utils.FormatChips(-g.Profit), utils.ChipsEmoji), Inline: false})
+	} else {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Result", Value: "Push", Inline: false})
 	}
-	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Bet", Value: fmt.Sprintf("%s %s", utils.FormatChips(g.Bet), utils.ChipsEmoji), Inline: true}, &discordgo.MessageEmbedField{Name: profitFieldName, Value: profitVal, Inline: true}, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", utils.FormatChips(newBalance), utils.ChipsEmoji), Inline: true})
-	if xpGain > 0 {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP Gained", Value: fmt.Sprintf("%s XP", utils.FormatChips(xpGain)), Inline: true})
-	}
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", utils.FormatChips(newBalance), utils.ChipsEmoji), Inline: false})
 	embed.Footer.Text += " | Game Over"
 	return embed
 }

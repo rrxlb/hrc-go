@@ -304,6 +304,10 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		roulette.HandleRouletteInteraction(s, i)
 	}
 
+	if strings.HasPrefix(customID, "baccarat_") {
+		baccarat.HandleBaccaratButton(s, i)
+	}
+
 	if strings.HasPrefix(customID, "tcp_") {
 		threecardpoker.HandleThreeCardPokerInteraction(s, i)
 	}
