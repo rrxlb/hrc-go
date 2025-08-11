@@ -392,3 +392,16 @@ func EditOriginalInteraction(s *discordgo.Session, i *discordgo.InteractionCreat
 	_, err := s.InteractionResponseEdit(i.Interaction, edit)
 	return err
 }
+
+// BotLogf provides centralized formatted logging for component/game issues
+func BotLogf(area string, format string, args ...interface{}) {
+	log.Printf("[%s] "+format, append([]interface{}{area}, args...)...)
+}
+
+// TryEphemeralFollowup attempts to send a small ephemeral notice if an update failed.
+// It ignores errors (e.g., if the token interaction no longer valid).
+func TryEphemeralFollowup(s *discordgo.Session, i *discordgo.InteractionCreate, content string) error {
+	params := &discordgo.WebhookParams{Content: content, Flags: discordgo.MessageFlagsEphemeral}
+	_, err := s.FollowupMessageCreate(i.Interaction, true, params)
+	return err
+}

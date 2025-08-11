@@ -200,10 +200,14 @@ func (g *Game) finishViaComponentUpdate(s *discordgo.Session, i *discordgo.Inter
 		utils.CreateButton("baccarat_tie", "Tie", discordgo.SecondaryButton, true, &discordgo.ComponentEmoji{Name: ""}),
 	)}
 	if err := utils.UpdateComponentInteraction(s, i, embed, components); err != nil {
+		utils.BotLogf("baccarat", "UpdateComponentInteraction failed for user %d: %v", g.UserID, err)
 		// fallback channel edit
 		embeds := []*discordgo.MessageEmbed{embed}
 		edit := &discordgo.MessageEdit{ID: i.Message.ID, Channel: i.ChannelID, Embeds: &embeds, Components: &components}
 		_, _ = s.ChannelMessageEditComplex(edit)
+		// NOTE: This does not satisfy the interaction, so the client may show 'This interaction failed'.
+		// As a secondary attempt, try sending an ephemeral ack if still possible.
+		_ = utils.TryEphemeralFollowup(s, i, "⚠️ Display update failed, showing result above.")
 	}
 	delete(activeBaccaratGames, g.UserID)
 }
