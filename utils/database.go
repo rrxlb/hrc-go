@@ -157,6 +157,11 @@ func SetupDatabase() error {
 	dbInitialized = true
 
 	log.Printf("Database connection initialized successfully")
+
+	// Ensure core tables exist
+	if err := createUsersTable(); err != nil {
+		log.Printf("Warning: Failed to create users table: %v", err)
+	}
 	
 	// Create user_achievements table if it doesn't exist
 	if err := createUserAchievementsTable(); err != nil {
@@ -624,5 +629,39 @@ func createUserAchievementsTable() error {
 	}
 
 	log.Println("user_achievements table created/verified successfully")
+	return nil
+}
+
+// createUsersTable creates the users table if it does not exist
+func createUsersTable() error {
+	if DB == nil {
+		return fmt.Errorf("database not connected")
+	}
+	ctx := context.Background()
+	query := `CREATE TABLE IF NOT EXISTS users (
+		user_id BIGINT PRIMARY KEY,
+		chips BIGINT NOT NULL DEFAULT 0,
+		total_xp BIGINT NOT NULL DEFAULT 0,
+		current_xp BIGINT NOT NULL DEFAULT 0,
+		prestige INTEGER NOT NULL DEFAULT 0,
+		wins INTEGER NOT NULL DEFAULT 0,
+		losses INTEGER NOT NULL DEFAULT 0,
+		daily_bonuses_claimed INTEGER NOT NULL DEFAULT 0,
+		votes_count INTEGER NOT NULL DEFAULT 0,
+		last_hourly TIMESTAMPTZ,
+		last_daily TIMESTAMPTZ,
+		last_weekly TIMESTAMPTZ,
+		last_vote TIMESTAMPTZ,
+		last_bonus TIMESTAMPTZ,
+		premium_settings JSONB,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE INDEX IF NOT EXISTS idx_users_chips ON users(chips);
+	CREATE INDEX IF NOT EXISTS idx_users_total_xp ON users(total_xp);
+	CREATE INDEX IF NOT EXISTS idx_users_wins ON users(wins);`
+	if _, err := DB.Exec(ctx, query); err != nil {
+		return fmt.Errorf("failed to create users table: %w", err)
+	}
+	log.Println("users table created/verified successfully")
 	return nil
 }
