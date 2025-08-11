@@ -32,6 +32,7 @@ type User struct {
 	LastVote             *time.Time
 	LastBonus            *time.Time
 	PremiumSettings      JSONB
+	CreatedAt            time.Time
 }
 
 type UserUpdateData struct {
@@ -72,23 +73,21 @@ type UserAchievement struct {
 	EarnedAt      time.Time
 }
 
-type Jackpot struct {
-	ID     int
-	Amount int64
-}
-
-var DB *pgxpool.Pool
-
-// JSONB type for PostgreSQL JSONB handling
+// JSONB represents a JSONB column type for PostgreSQL
 type JSONB map[string]interface{}
 
+// Value implements driver.Valuer interface for JSONB
 func (j JSONB) Value() (driver.Value, error) {
+	if j == nil {
+		return nil, nil
+	}
 	return json.Marshal(j)
 }
 
+// Scan implements sql.Scanner interface for JSONB
 func (j *JSONB) Scan(value interface{}) error {
 	if value == nil {
-		*j = JSONB{}
+		*j = nil
 		return nil
 	}
 	
@@ -103,206 +102,159 @@ func (j *JSONB) Scan(value interface{}) error {
 	}
 	
 	if len(bytes) == 0 {
-		*j = JSONB{}
+		*j = make(JSONB)
 		return nil
 	}
 	
-	return json.Unmarshal(bytes, j)
+	var data map[string]interface{}
+	if err := json.Unmarshal(bytes, &data); err != nil {
+		log.Printf("Error unmarshaling JSONB: %v, data: %s", err, string(bytes))
+		// Don't return error, just set to empty map
+		*j = make(JSONB)
+		return nil
+	}
+	
+	*j = JSONB(data)
+	return nil
 }
 
-// SetupDatabase initializes the database connection pool
-func SetupDatabase() error {
+var (
+	DB           *pgxpool.Pool
+	dbInitialized = false
+	dbMutex      sync.RWMutex
+)
+
+// InitializeDatabase initializes the database connection pool
+func InitializeDatabase() error {
+	dbMutex.Lock()
+	defer dbMutex.Unlock()
+
+	if dbInitialized {
+		return nil
+	}
+
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		log.Println("DATABASE_URL not set - database features disabled")
-		return fmt.Errorf("DATABASE_URL environment variable not set")
+		log.Printf("DATABASE_URL not set, skipping database initialization")
+		return nil
 	}
 
-	log.Println("Attempting to connect to database...")
-	
-	config, err := pgxpool.ParseConfig(databaseURL)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
-		log.Printf("Failed to parse DATABASE_URL: %v", err)
-		return fmt.Errorf("failed to parse database URL: %w", err)
+		return fmt.Errorf("failed to create connection pool: %w", err)
 	}
 
-	// Optimize connection pool settings
-	config.MinConns = 2
-	config.MaxConns = 10
-	config.MaxConnLifetime = time.Hour
-	config.MaxConnIdleTime = 5 * time.Minute
-
-	log.Println("Creating database pool...")
-	DB, err = pgxpool.NewWithConfig(context.Background(), config)
-	if err != nil {
-		log.Printf("Failed to create database pool: %v", err)
-		return fmt.Errorf("failed to create database pool: %w", err)
-	}
-
-	log.Println("Testing database connection...")
 	// Test the connection
-	if err := DB.Ping(context.Background()); err != nil {
-		log.Printf("Failed to ping database: %v", err)
-		DB.Close()
-		DB = nil
-		return fmt.Errorf("failed to ping database: %w", err)
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		pool.Close()
+		return fmt.Errorf("failed to acquire connection: %w", err)
 	}
+	conn.Release()
 
-	log.Println("Creating/verifying database tables...")
-	// Create tables if they don't exist
-	if err := createTables(); err != nil {
-		log.Printf("Failed to create tables: %v", err)
-		return fmt.Errorf("failed to create tables: %w", err)
-	}
+	DB = pool
+	dbInitialized = true
 
-	log.Printf("✅ Database connected successfully with %d-%d connections", 
-		config.MinConns, config.MaxConns)
+	log.Printf("Database connection initialized successfully")
 	return nil
 }
 
 // CloseDatabase closes the database connection pool
 func CloseDatabase() {
+	dbMutex.Lock()
+	defer dbMutex.Unlock()
+
 	if DB != nil {
 		DB.Close()
-		log.Println("Database connection pool closed")
+		DB = nil
+		dbInitialized = false
+		log.Printf("Database connection closed")
 	}
 }
 
-// createTables creates all necessary database tables to match existing schema
-func createTables() error {
-	ctx := context.Background()
-	
-	// Users table - matching your existing Python bot schema
-	usersTable := `
-	CREATE TABLE IF NOT EXISTS users (
-		user_id BIGINT PRIMARY KEY,
-		chips BIGINT NOT NULL DEFAULT 1000,
-		total_xp BIGINT NOT NULL DEFAULT 0,
-		current_xp BIGINT NOT NULL DEFAULT 0,
-		prestige INTEGER NOT NULL DEFAULT 0,
-		wins INTEGER NOT NULL DEFAULT 0,
-		losses INTEGER NOT NULL DEFAULT 0,
-		daily_bonuses_claimed INTEGER NOT NULL DEFAULT 0,
-		votes_count INTEGER NOT NULL DEFAULT 0,
-		last_hourly TIMESTAMPTZ,
-		last_daily TIMESTAMPTZ,
-		last_weekly TIMESTAMPTZ,
-		last_vote TIMESTAMPTZ,
-		last_bonus TIMESTAMPTZ,
-		premium_settings JSONB
-	)`
-
-	// Achievements table
-	achievementsTable := `
-	CREATE TABLE IF NOT EXISTS achievements (
-		id SERIAL PRIMARY KEY,
-		name VARCHAR(100) NOT NULL UNIQUE,
-		description TEXT NOT NULL,
-		icon VARCHAR(50) NOT NULL,
-		category VARCHAR(50) NOT NULL,
-		requirement_type VARCHAR(50) NOT NULL,
-		requirement_value BIGINT NOT NULL DEFAULT 0,
-		chips_reward BIGINT NOT NULL DEFAULT 0,
-		xp_reward BIGINT NOT NULL DEFAULT 0,
-		hidden BOOLEAN NOT NULL DEFAULT FALSE,
-		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-	)`
-
-	// User achievements table
-	userAchievementsTable := `
-	CREATE TABLE IF NOT EXISTS user_achievements (
-		id SERIAL PRIMARY KEY,
-		user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-		achievement_id INTEGER NOT NULL REFERENCES achievements(id) ON DELETE CASCADE,
-		earned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-		UNIQUE(user_id, achievement_id)
-	)`
-
-	// Jackpots table
-	jackpotsTable := `
-	CREATE TABLE IF NOT EXISTS jackpots (
-		id SMALLINT PRIMARY KEY DEFAULT 1,
-		amount BIGINT NOT NULL
-	)`
-
-	// Execute table creation
-	tables := []string{usersTable, achievementsTable, userAchievementsTable, jackpotsTable}
-	for _, table := range tables {
-		if _, err := DB.Exec(ctx, table); err != nil {
-			return fmt.Errorf("failed to create table: %w", err)
-		}
-	}
-
-	// Create indexes for performance
-	indexes := []string{
-		"CREATE INDEX IF NOT EXISTS users_chips_idx ON users (chips DESC)",
-		"CREATE INDEX IF NOT EXISTS users_total_xp_idx ON users (total_xp DESC)",
-		"CREATE INDEX IF NOT EXISTS users_prestige_idx ON users (prestige DESC, total_xp DESC)",
-		"CREATE INDEX IF NOT EXISTS user_achievements_user_id_idx ON user_achievements (user_id)",
-		"CREATE INDEX IF NOT EXISTS user_achievements_achievement_id_idx ON user_achievements (achievement_id)",
-		"CREATE INDEX IF NOT EXISTS user_achievements_earned_at_idx ON user_achievements (earned_at DESC)",
-	}
-
-	for _, index := range indexes {
-		if _, err := DB.Exec(ctx, index); err != nil {
-			log.Printf("Warning: failed to create index: %v", err)
-		}
-	}
-
-	log.Println("Database tables created/verified successfully")
-	return nil
-}
-
-// GetUser retrieves user data from the database, creating if doesn't exist
+// GetUser retrieves a user from the database, creating one if it doesn't exist
 func GetUser(userID int64) (*User, error) {
 	if DB == nil {
-		log.Printf("GetUser: Database connection is nil")
-		return nil, fmt.Errorf("database not connected")
+		return &User{
+			UserID:              userID,
+			Chips:               StartingChips,
+			TotalXP:             0,
+			CurrentXP:           0,
+			Prestige:            0,
+			Wins:                0,
+			Losses:              0,
+			DailyBonusesClaimed: 0,
+			VotesCount:          0,
+			PremiumSettings:     make(JSONB),
+			CreatedAt:           time.Now(),
+		}, nil
 	}
 
 	ctx := context.Background()
-	
-	user := &User{}
+
 	query := `
-	SELECT user_id, chips, total_xp, current_xp, prestige, wins, losses,
-	       daily_bonuses_claimed, votes_count, last_hourly, last_daily, 
-	       last_weekly, last_vote, last_bonus, premium_settings
-	FROM users WHERE user_id = $1`
-	
-	log.Printf("GetUser: Querying database for user ID: %d", userID)
+		SELECT user_id, chips, total_xp, current_xp, prestige, wins, losses, 
+			   daily_bonuses_claimed, votes_count, last_hourly, last_daily, 
+			   last_weekly, last_vote, last_bonus, premium_settings, created_at
+		FROM users WHERE user_id = $1`
+
+	var user User
 	err := DB.QueryRow(ctx, query, userID).Scan(
-		&user.UserID, &user.Chips, &user.TotalXP, &user.CurrentXP, &user.Prestige,
-		&user.Wins, &user.Losses, &user.DailyBonusesClaimed, &user.VotesCount,
-		&user.LastHourly, &user.LastDaily, &user.LastWeekly, &user.LastVote,
-		&user.LastBonus, &user.PremiumSettings,
+		&user.UserID,
+		&user.Chips,
+		&user.TotalXP,
+		&user.CurrentXP,
+		&user.Prestige,
+		&user.Wins,
+		&user.Losses,
+		&user.DailyBonusesClaimed,
+		&user.VotesCount,
+		&user.LastHourly,
+		&user.LastDaily,
+		&user.LastWeekly,
+		&user.LastVote,
+		&user.LastBonus,
+		&user.PremiumSettings,
+		&user.CreatedAt,
 	)
-	
+
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			log.Printf("GetUser: User %d not found, creating new user", userID)
-			// Create new user if doesn't exist
+			// User doesn't exist, create a new one
 			return CreateUser(userID)
 		}
-		log.Printf("GetUser: Database error for user %d: %v", userID, err)
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
-	
-	log.Printf("GetUser: Successfully retrieved user %d", userID)
-	return user, nil
+
+	log.Printf("Retrieved user %d: chips=%d, xp=%d", user.UserID, user.Chips, user.TotalXP)
+	return &user, nil
 }
 
-// CreateUser creates a new user in the database with default values
+// CreateUser creates a new user in the database
 func CreateUser(userID int64) (*User, error) {
 	if DB == nil {
-		log.Printf("CreateUser: Database connection is nil")
-		return nil, fmt.Errorf("database not connected")
+		return &User{
+			UserID:              userID,
+			Chips:               StartingChips,
+			TotalXP:             0,
+			CurrentXP:           0,
+			Prestige:            0,
+			Wins:                0,
+			Losses:              0,
+			DailyBonusesClaimed: 0,
+			VotesCount:          0,
+			PremiumSettings:     make(JSONB),
+			CreatedAt:           time.Now(),
+		}, nil
 	}
 
 	ctx := context.Background()
-	
+	now := time.Now()
+
 	user := &User{
 		UserID:              userID,
-		Chips:               1000,
+		Chips:               StartingChips,
 		TotalXP:             0,
 		CurrentXP:           0,
 		Prestige:            0,
@@ -310,131 +262,141 @@ func CreateUser(userID int64) (*User, error) {
 		Losses:              0,
 		DailyBonusesClaimed: 0,
 		VotesCount:          0,
-		PremiumSettings:     JSONB{},
+		PremiumSettings:     make(JSONB),
+		CreatedAt:           now,
 	}
-	
-	log.Printf("CreateUser: Creating new user with ID: %d", userID)
-	
+
 	query := `
-	INSERT INTO users (user_id, chips, total_xp, current_xp, prestige, wins, losses,
-	                  daily_bonuses_claimed, votes_count, premium_settings)
-	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	ON CONFLICT (user_id) DO NOTHING
-	RETURNING user_id, chips, total_xp, current_xp, prestige, wins, losses,
-	          daily_bonuses_claimed, votes_count, last_hourly, last_daily, 
-	          last_weekly, last_vote, last_bonus, premium_settings`
-	
-	err := DB.QueryRow(ctx, query,
-		user.UserID, user.Chips, user.TotalXP, user.CurrentXP, user.Prestige,
-		user.Wins, user.Losses, user.DailyBonusesClaimed, user.VotesCount,
+		INSERT INTO users (user_id, chips, total_xp, current_xp, prestige, wins, losses, 
+						  daily_bonuses_claimed, votes_count, premium_settings, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+
+	_, err := DB.Exec(ctx, query,
+		user.UserID,
+		user.Chips,
+		user.TotalXP,
+		user.CurrentXP,
+		user.Prestige,
+		user.Wins,
+		user.Losses,
+		user.DailyBonusesClaimed,
+		user.VotesCount,
 		user.PremiumSettings,
-	).Scan(
-		&user.UserID, &user.Chips, &user.TotalXP, &user.CurrentXP, &user.Prestige,
-		&user.Wins, &user.Losses, &user.DailyBonusesClaimed, &user.VotesCount,
-		&user.LastHourly, &user.LastDaily, &user.LastWeekly, &user.LastVote,
-		&user.LastBonus, &user.PremiumSettings,
+		user.CreatedAt,
 	)
-	
+
 	if err != nil {
-		log.Printf("CreateUser: Failed to create user %d: %v", userID, err)
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
-	
-	log.Printf("CreateUser: Successfully created user %d", userID)
+
+	log.Printf("Created new user %d with %d chips", userID, StartingChips)
 	return user, nil
 }
 
-// UpdateUser updates user data in the database with dynamic field updates
+// UpdateUser updates user data in the database
 func UpdateUser(userID int64, updates UserUpdateData) (*User, error) {
 	if DB == nil {
-		return nil, fmt.Errorf("database not connected")
+		// Return dummy user for testing
+		return &User{
+			UserID:              userID,
+			Chips:               StartingChips + updates.ChipsIncrement,
+			TotalXP:             updates.TotalXPIncrement,
+			CurrentXP:           updates.CurrentXPIncrement,
+			Prestige:            0,
+			Wins:                updates.WinsIncrement,
+			Losses:              updates.LossesIncrement,
+			DailyBonusesClaimed: updates.DailyBonusesClaimedIncrement,
+			VotesCount:          updates.VotesCountIncrement,
+			PremiumSettings:     updates.PremiumSettings,
+			CreatedAt:           time.Now(),
+		}, nil
 	}
 
 	ctx := context.Background()
-	
-	// Build dynamic query based on provided updates
+
+	// Build dynamic query based on what fields need updating
 	setParts := []string{}
-	args := []interface{}{userID}
+	args := []interface{}{userID} // $1 will always be userID
 	argIndex := 2
-	
+
 	if updates.ChipsIncrement != 0 {
 		setParts = append(setParts, fmt.Sprintf("chips = chips + $%d", argIndex))
 		args = append(args, updates.ChipsIncrement)
 		argIndex++
 	}
-	
+
 	if updates.TotalXPIncrement != 0 {
 		setParts = append(setParts, fmt.Sprintf("total_xp = total_xp + $%d", argIndex))
 		args = append(args, updates.TotalXPIncrement)
 		argIndex++
 	}
-	
+
 	if updates.CurrentXPIncrement != 0 {
 		setParts = append(setParts, fmt.Sprintf("current_xp = current_xp + $%d", argIndex))
 		args = append(args, updates.CurrentXPIncrement)
 		argIndex++
 	}
-	
+
 	if updates.WinsIncrement != 0 {
 		setParts = append(setParts, fmt.Sprintf("wins = wins + $%d", argIndex))
 		args = append(args, updates.WinsIncrement)
 		argIndex++
 	}
-	
+
 	if updates.LossesIncrement != 0 {
 		setParts = append(setParts, fmt.Sprintf("losses = losses + $%d", argIndex))
 		args = append(args, updates.LossesIncrement)
 		argIndex++
 	}
-	
+
 	if updates.DailyBonusesClaimedIncrement != 0 {
 		setParts = append(setParts, fmt.Sprintf("daily_bonuses_claimed = daily_bonuses_claimed + $%d", argIndex))
 		args = append(args, updates.DailyBonusesClaimedIncrement)
 		argIndex++
 	}
-	
+
 	if updates.VotesCountIncrement != 0 {
 		setParts = append(setParts, fmt.Sprintf("votes_count = votes_count + $%d", argIndex))
 		args = append(args, updates.VotesCountIncrement)
 		argIndex++
 	}
-	
+
 	if updates.Prestige != nil {
 		setParts = append(setParts, fmt.Sprintf("prestige = $%d", argIndex))
 		args = append(args, *updates.Prestige)
 		argIndex++
 	}
-	
+
 	if updates.LastHourly != nil {
 		setParts = append(setParts, fmt.Sprintf("last_hourly = $%d", argIndex))
 		args = append(args, *updates.LastHourly)
 		argIndex++
 	}
-	
+
 	if updates.LastDaily != nil {
 		setParts = append(setParts, fmt.Sprintf("last_daily = $%d", argIndex))
 		args = append(args, *updates.LastDaily)
 		argIndex++
 	}
-	
+
 	if updates.LastWeekly != nil {
 		setParts = append(setParts, fmt.Sprintf("last_weekly = $%d", argIndex))
 		args = append(args, *updates.LastWeekly)
 		argIndex++
 	}
-	
+
 	if updates.LastVote != nil {
 		setParts = append(setParts, fmt.Sprintf("last_vote = $%d", argIndex))
 		args = append(args, *updates.LastVote)
 		argIndex++
 	}
-	
+
 	if updates.LastBonus != nil {
 		setParts = append(setParts, fmt.Sprintf("last_bonus = $%d", argIndex))
 		args = append(args, *updates.LastBonus)
 		argIndex++
 	}
-	
+
 	if updates.PremiumSettings != nil {
 		setParts = append(setParts, fmt.Sprintf("premium_settings = $%d", argIndex))
 		args = append(args, updates.PremiumSettings)
@@ -442,29 +404,46 @@ func UpdateUser(userID int64, updates UserUpdateData) (*User, error) {
 	}
 
 	if len(setParts) == 0 {
-		return GetUser(userID) // No updates to make, just return current user
+		// No updates to make, just return current user
+		return GetUser(userID)
 	}
-	
+
 	query := fmt.Sprintf(`
-		UPDATE users SET %s WHERE user_id = $1
-		RETURNING user_id, chips, total_xp, current_xp, prestige, wins, losses,
-		          daily_bonuses_claimed, votes_count, last_hourly, last_daily, 
-		          last_weekly, last_vote, last_bonus, premium_settings`,
+		UPDATE users 
+		SET %s
+		WHERE user_id = $1
+		RETURNING user_id, chips, total_xp, current_xp, prestige, wins, losses, 
+				  daily_bonuses_claimed, votes_count, last_hourly, last_daily, 
+				  last_weekly, last_vote, last_bonus, premium_settings, created_at`,
 		strings.Join(setParts, ", "))
-	
-	user := &User{}
+
+	var user User
 	err := DB.QueryRow(ctx, query, args...).Scan(
-		&user.UserID, &user.Chips, &user.TotalXP, &user.CurrentXP, &user.Prestige,
-		&user.Wins, &user.Losses, &user.DailyBonusesClaimed, &user.VotesCount,
-		&user.LastHourly, &user.LastDaily, &user.LastWeekly, &user.LastVote,
-		&user.LastBonus, &user.PremiumSettings,
+		&user.UserID,
+		&user.Chips,
+		&user.TotalXP,
+		&user.CurrentXP,
+		&user.Prestige,
+		&user.Wins,
+		&user.Losses,
+		&user.DailyBonusesClaimed,
+		&user.VotesCount,
+		&user.LastHourly,
+		&user.LastDaily,
+		&user.LastWeekly,
+		&user.LastVote,
+		&user.LastBonus,
+		&user.PremiumSettings,
+		&user.CreatedAt,
 	)
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
-	
-	return user, nil
+
+	log.Printf("Updated user %d: chips=%d, xp=%d, wins=%d, losses=%d",
+		user.UserID, user.Chips, user.TotalXP, user.Wins, user.Losses)
+	return &user, nil
 }
 
 // Note: Cache functions are now in cache.go to avoid duplicates

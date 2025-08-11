@@ -77,7 +77,7 @@ func CreateButton(customID, label string, style discordgo.ButtonStyle, disabled 
 	}
 	
 	if emoji != nil {
-		button.Emoji = *emoji
+		button.Emoji = emoji
 	}
 	
 	return button
@@ -286,18 +286,17 @@ func PaginationView(prevID, nextID string, currentPage, totalPages int) []discor
 
 // SendInteractionResponse sends an interaction response with embed and components
 func SendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, ephemeral bool) error {
-	flags := uint64(0)
+	data := &discordgo.InteractionResponseData{
+		Embeds:     []*discordgo.MessageEmbed{embed},
+		Components: components,
+	}
 	if ephemeral {
-		flags = discordgo.MessageFlagsEphemeral
+		data.Flags = discordgo.MessageFlagsEphemeral
 	}
 	
 	response := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds:     []*discordgo.MessageEmbed{embed},
-			Components: components,
-			Flags:      flags,
-		},
+		Data: data,
 	}
 	
 	return s.InteractionRespond(i.Interaction, response)
@@ -316,32 +315,29 @@ func UpdateInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCre
 
 // SendFollowupMessage sends a followup message
 func SendFollowupMessage(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, ephemeral bool) error {
-	flags := uint64(0)
-	if ephemeral {
-		flags = discordgo.MessageFlagsEphemeral
-	}
-	
-	_, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+	params := &discordgo.WebhookParams{
 		Embeds:     []*discordgo.MessageEmbed{embed},
 		Components: components,
-		Flags:      flags,
-	})
+	}
+	if ephemeral {
+		params.Flags = discordgo.MessageFlagsEphemeral
+	}
+	
+	_, err := s.FollowupMessageCreate(i.Interaction, true, params)
 	
 	return err
 }
 
 // DeferInteractionResponse defers an interaction response
 func DeferInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, ephemeral bool) error {
-	flags := uint64(0)
+	data := &discordgo.InteractionResponseData{}
 	if ephemeral {
-		flags = discordgo.MessageFlagsEphemeral
+		data.Flags = discordgo.MessageFlagsEphemeral
 	}
 	
 	response := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Flags: flags,
-		},
+		Data: data,
 	}
 	
 	return s.InteractionRespond(i.Interaction, response)

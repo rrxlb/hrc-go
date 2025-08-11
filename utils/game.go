@@ -215,15 +215,14 @@ func (bg *BaseGame) RespondWithError(message string) error {
 
 // SendFollowup sends a followup message
 func (bg *BaseGame) SendFollowup(embed *discordgo.MessageEmbed, ephemeral bool) error {
-	flags := uint64(0)
+	params := &discordgo.WebhookParams{
+		Embeds: []*discordgo.MessageEmbed{embed},
+	}
 	if ephemeral {
-		flags = discordgo.MessageFlagsEphemeral
+		params.Flags = discordgo.MessageFlagsEphemeral
 	}
 	
-	_, err := bg.Session.FollowupMessageCreate(bg.Interaction.Interaction, true, &discordgo.WebhookParams{
-		Embeds: []*discordgo.MessageEmbed{embed},
-		Flags:  flags,
-	})
+	_, err := bg.Session.FollowupMessageCreate(bg.Interaction.Interaction, true, params)
 	
 	return err
 }
