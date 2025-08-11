@@ -537,7 +537,7 @@ func ThreeCardPokerEmbed(state string, playerHand []string, dealerHand []string,
 		description = "Decide to Play or Fold."
 	}
 	if state == "final" || state == "forced_end" {
-		description = outcome
+		// Keep description blank; outcome will appear only in dedicated field below
 		if profit > 0 {
 			color = 0x2ECC71
 		} else if profit < 0 {
@@ -547,7 +547,7 @@ func ThreeCardPokerEmbed(state string, playerHand []string, dealerHand []string,
 		}
 	}
 	embed := CreateBrandedEmbed(title, description, color)
-	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753042166/3_vxurig.png"}
+	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1754083114/TC2_ugnpqd.png"}
 	// Card fields (side-by-side)
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Your Hand", Value: fmt.Sprintf("`%s`\n%s", strings.Join(playerHand, " "), playerEval), Inline: true})
 	if state == "initial" {
