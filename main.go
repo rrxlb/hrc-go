@@ -1,10 +1,8 @@
 package main
 
 import (
-	"crypto/tls"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,10 +22,8 @@ var botStatus = "starting"
 var readyCh = make(chan struct{}, 1)
 
 func main() {
-	// Start HTTP server for Railway health checks
+	// Start HTTP server for health checks
 	go startHealthServer()
-
-	log.Println("[startup] Main initialization sequence starting...")
 
 	// Initialize database
 	if err := utils.SetupDatabase(); err != nil {
@@ -52,72 +48,41 @@ func main() {
 		log.Println("Achievement system initialized")
 	}
 
-	// Initialize jackpot system
+	// Initialize jackpot system (non-blocking but quieter)
 	jackpotInitCh := make(chan error, 1)
-	log.Println("[startup] Beginning jackpot manager initialization (async)...")
-	go func() {
-		jackpotInitCh <- utils.InitializeJackpotManager()
-	}()
-
+	go func() { jackpotInitCh <- utils.InitializeJackpotManager() }()
 	select {
 	case err := <-jackpotInitCh:
 		if err != nil {
-			log.Printf("Jackpot manager initialization failed: %v", err)
-			log.Println("Bot will continue without jackpot features")
+			log.Printf("Jackpot manager init failed: %v", err)
 		} else {
-			log.Println("Jackpot system initialized (async)")
+			log.Println("Jackpot system initialized")
 		}
-	case <-time.After(5 * time.Second):
-		log.Println("[warn] Jackpot manager initialization taking longer than 5s; continuing startup. Will log result when complete.")
-		go func() { // log late result
+	case <-time.After(3 * time.Second):
+		log.Println("Jackpot init continuing in background...")
+		go func() {
 			if err := <-jackpotInitCh; err != nil {
-				log.Printf("[late] Jackpot manager initialized with error after delay: %v", err)
+				log.Printf("Jackpot manager late init error: %v", err)
 			} else {
-				log.Println("[late] Jackpot manager initialized successfully after delay")
+				log.Println("Jackpot system initialized (late)")
 			}
 		}()
 	}
 
 	// (Game manager initialization removed; legacy interface cleanup)
 
-	// Get bot token from environment (support multiple common var names)
+	// Get bot token from environment (common variable names)
 	var token string
 	for _, key := range []string{"BOT_TOKEN", "DISCORD_TOKEN", "DISCORD_BOT_TOKEN", "HRC_BOT_TOKEN"} {
-		val := strings.TrimSpace(os.Getenv(key))
-		if val != "" {
-			log.Printf("[startup] Using token from env var %s", key)
+		if val := strings.TrimSpace(os.Getenv(key)); val != "" {
 			token = val
 			break
 		}
 	}
 	if token == "" {
-		log.Println("[startup] No BOT_TOKEN or DISCORD_TOKEN environment variable found – bot will not connect. Set BOT_TOKEN.")
+		log.Println("Bot token missing (BOT_TOKEN). Exiting idle.")
 		botStatus = "no_token"
 		select {}
-	}
-
-	// Basic sanity check (Discord bot tokens have three parts separated by '.')
-	parts := strings.Split(token, ".")
-	if len(parts) < 3 {
-		log.Println("[startup] BOT_TOKEN format looks invalid (expected 3 segments). Refusing to connect.")
-		botStatus = "invalid_token"
-		select {}
-	}
-
-	masked := func(t string) string {
-		if len(t) <= 10 {
-			return "***"
-		}
-		return t[:4] + "..." + t[len(t)-4:]
-	}(token)
-	log.Printf("[startup] Retrieved bot token (masked): %s | segments=%d", masked, len(parts))
-
-	// Preflight network connectivity to Discord
-	log.Println("[net] Starting Discord connectivity preflight (tcp + tls)...")
-	if err := testDiscordConnectivity(); err != nil {
-		log.Printf("[warn] Discord connectivity preflight failed: %v", err)
-	} else {
-		log.Println("[net] Discord connectivity preflight succeeded")
 	}
 
 	// Create Discord session
@@ -134,7 +99,7 @@ func main() {
 	// Optional: uncomment if you later need message content
 	// session.Identify.Intents |= discordgo.IntentMessageContent
 
-	log.Println("[discord] Discord session object created, opening gateway connection...")
+	log.Println("Starting Discord session...")
 
 	// Add event handlers
 	session.AddHandler(onReady)
@@ -147,28 +112,21 @@ func main() {
 		botStatus = "connection_failed"
 		select {}
 	}
-	log.Println("[discord] Gateway connection attempt initiated, waiting for READY event (30s timeout)...")
+	log.Println("Waiting for READY (30s timeout)...")
 
 	// Wait for READY or timeout to help diagnose hanging
 	select {
 	case <-readyCh:
-		log.Println("[discord] Received READY event from Discord.")
+		// READY received
 	case <-time.After(30 * time.Second):
-		log.Println("[warn] Did not receive READY within 30s. Verify token, enabled intents (SERVER MEMBERS & others in Dev Portal), and that the bot is invited to at least one guild.")
+		log.Println("READY not received in 30s (continuing). Ensure bot is in a guild and intents enabled if interactions fail.")
 	}
 	defer session.Close()
 
 	log.Println("Bot is now running. Press CTRL+C to exit.")
 	botStatus = "running"
 
-	// Heartbeat diagnostic goroutine
-	go func() {
-		ticker := time.NewTicker(15 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			log.Printf("[heartbeat] status=%s", botStatus)
-		}
-	}()
+	// (Removed verbose heartbeat logging)
 
 	// Wait for interrupt signal
 	stop := make(chan os.Signal, 1)
@@ -179,29 +137,7 @@ func main() {
 	botStatus = "shutting_down"
 }
 
-// testDiscordConnectivity performs a lightweight TCP + TLS dial to Discord API host
-func testDiscordConnectivity() error {
-	// Primary REST API host
-	apiHost := "discord.com:443"
-	start := time.Now()
-	conn, err := net.DialTimeout("tcp", apiHost, 3*time.Second)
-	if err != nil {
-		return fmt.Errorf("tcp dial failed: %w", err)
-	}
-	defer conn.Close()
-	durTCP := time.Since(start)
-
-	// Upgrade to TLS to ensure handshake works
-	startTLS := time.Now()
-	client := tls.Client(conn, &tls.Config{ServerName: "discord.com"})
-	if err := client.Handshake(); err != nil {
-		return fmt.Errorf("tls handshake failed: %w", err)
-	}
-	durTLS := time.Since(startTLS)
-
-	log.Printf("[net] Preflight TCP ok (%.0fms), TLS ok (%.0fms)", durTCP.Seconds()*1000, durTLS.Seconds()*1000)
-	return nil
-}
+// (Removed network preflight test to reduce noise)
 
 func onReady(s *discordgo.Session, event *discordgo.Ready) {
 	log.Printf("✅ Discord Bot logged in as %s (ID: %s)", event.User.Username, event.User.ID)
@@ -325,208 +261,48 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 func handlePingCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	startTime := time.Now()
-
-	// Calculate approximate latency
+	start := time.Now()
 	latency := s.HeartbeatLatency()
-
-	embed := &discordgo.MessageEmbed{
-		Title: "🏓 Pong!",
-		Color: 0x5865F2,
-		Fields: []*discordgo.MessageEmbedField{
-			{
-				Name:   "Latency",
-				Value:  fmt.Sprintf("%dms", latency.Milliseconds()),
-				Inline: true,
-			},
-			{
-				Name:   "Status",
-				Value:  "✅ Online",
-				Inline: true,
-			},
-			{
-				Name:   "Response Time",
-				Value:  fmt.Sprintf("%dms", time.Since(startTime).Milliseconds()),
-				Inline: true,
-			},
-		},
-		Timestamp: time.Now().Format(time.RFC3339),
+	embed := utils.CreateBrandedEmbed("🏓 Pong!", "", utils.BotColor)
+	embed.Fields = []*discordgo.MessageEmbedField{
+		{Name: "Latency", Value: fmt.Sprintf("%dms", latency.Milliseconds()), Inline: true},
+		{Name: "Status", Value: "✅ Online", Inline: true},
+		{Name: "Response Time", Value: fmt.Sprintf("%dms", time.Since(start).Milliseconds()), Inline: true},
 	}
-
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{embed},
-		},
-	})
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}}})
 }
 
 func handleInfoCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	embed := &discordgo.MessageEmbed{
-		Title:       "🎰 High Rollers Club Bot",
-		Description: "A Discord casino bot built with Go",
-		Color:       0x5865F2,
-		Fields: []*discordgo.MessageEmbedField{
-			{
-				Name:   "Version",
-				Value:  "2.0.0 (Go Rewrite)",
-				Inline: true,
-			},
-			{
-				Name:   "Language",
-				Value:  "Go",
-				Inline: true,
-			},
-			{
-				Name:   "Framework",
-				Value:  "DiscordGo",
-				Inline: true,
-			},
-			{
-				Name:   "Features",
-				Value:  "✅ User System & Profiles\n✅ Blackjack Game\n🔜 More Casino Games & Achievements",
-				Inline: false,
-			},
-		},
-		Timestamp: time.Now().Format(time.RFC3339),
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "High Rollers Club",
-		},
+	embed := utils.CreateBrandedEmbed("🎰 High Rollers Club Bot", "A Discord casino bot rewritten in Go", utils.BotColor)
+	embed.Fields = []*discordgo.MessageEmbedField{
+		{Name: "Version", Value: "2.0.0 (Go Rewrite)", Inline: true},
+		{Name: "Language", Value: "Go", Inline: true},
+		{Name: "Framework", Value: "DiscordGo", Inline: true},
+		{Name: "Features", Value: "✅ User System & Profiles\n✅ Blackjack Game\n🔜 More Casino Games & Achievements", Inline: false},
 	}
-
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{embed},
-		},
-	})
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}}})
 }
 
 func handleProfileCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
-	username := i.Member.User.Username
-
-	// Get or create user
 	user, err := utils.GetUser(userID)
 	if err != nil {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "❌ Error accessing user data. Database may be unavailable.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: "❌ Error accessing user data.", Flags: discordgo.MessageFlagsEphemeral}})
 		return
 	}
-
-	// Get rank information
-	rankName, rankIcon, rankColor, nextRankXP := utils.GetRank(user.TotalXP)
-
-	// Calculate win rate
-	totalGames := user.Wins + user.Losses
-	winRate := 0.0
-	if totalGames > 0 {
-		winRate = float64(user.Wins) / float64(totalGames) * 100
-	}
-
-	embed := &discordgo.MessageEmbed{
-		Title: fmt.Sprintf("🎰 %s's Casino Profile", username),
-		Color: rankColor,
-		Fields: []*discordgo.MessageEmbedField{
-			{
-				Name:   "💰 Chips",
-				Value:  fmt.Sprintf("%d <:chips:1396988413151940629>", user.Chips),
-				Inline: true,
-			},
-			{
-				Name:   "🏆 Rank",
-				Value:  fmt.Sprintf("%s %s", rankIcon, rankName),
-				Inline: true,
-			},
-			{
-				Name:   "⭐ Total XP",
-				Value:  fmt.Sprintf("%d", user.TotalXP),
-				Inline: true,
-			},
-			{
-				Name:   "🎯 Games Won",
-				Value:  fmt.Sprintf("%d", user.Wins),
-				Inline: true,
-			},
-			{
-				Name:   "💔 Games Lost",
-				Value:  fmt.Sprintf("%d", user.Losses),
-				Inline: true,
-			},
-			{
-				Name:   "📊 Win Rate",
-				Value:  fmt.Sprintf("%.1f%%", winRate),
-				Inline: true,
-			},
-		},
-		Timestamp: time.Now().Format(time.RFC3339),
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "Casino Profile",
-		},
-	}
-
-	// Add prestige if > 0
-	if user.Prestige > 0 {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "🌟 Prestige",
-			Value:  fmt.Sprintf("Level %d", user.Prestige),
-			Inline: true,
-		})
-	}
-
-	// Add next rank progress if not max rank
-	if nextRankXP > user.TotalXP {
-		xpNeeded := nextRankXP - user.TotalXP
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "🚀 Next Rank",
-			Value:  fmt.Sprintf("%d XP needed", xpNeeded),
-			Inline: true,
-		})
-	}
-
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{embed},
-		},
-	})
+	embed := utils.UserProfileEmbed(user, i.Member.User)
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}}})
 }
 
 func handleBalanceCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
-	username := i.Member.User.Username
-
-	// Get or create user
 	user, err := utils.GetUser(userID)
 	if err != nil {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "❌ Error accessing user data. Database may be unavailable.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: "❌ Error accessing user data.", Flags: discordgo.MessageFlagsEphemeral}})
 		return
 	}
-
-	embed := &discordgo.MessageEmbed{
-		Title:       fmt.Sprintf("💰 %s's Balance", username),
-		Color:       0x5865F2,
-		Description: fmt.Sprintf("You currently have **%d** <:chips:1396988413151940629> chips", user.Chips),
-		Timestamp:   time.Now().Format(time.RFC3339),
-	}
-
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{embed},
-		},
-	})
+	embed := utils.CreateBrandedEmbed("💰 Balance", fmt.Sprintf("You have **%d** %s chips", user.Chips, utils.ChipsEmoji), utils.BotColor)
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}}})
 }
 
 func startHealthServer() {
