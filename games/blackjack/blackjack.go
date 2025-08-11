@@ -215,12 +215,17 @@ func (bg *BlackjackGame) finishGame() error {
 	embed := bg.createGameEmbed(true)
 	components := bg.View.DisableAllButtons()
 
+	// Edit original interaction response to show final state
+	if err := utils.UpdateInteractionResponse(bg.Session, bg.Interaction, embed, components); err != nil {
+		return err
+	}
+
 	// Clean up the game
 	gamesMutex.Lock()
 	delete(ActiveGames, bg.GameID)
 	gamesMutex.Unlock()
 
-	return utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+	return nil
 }
 
 // playDealerHand plays the dealer's hand according to standard rules
@@ -343,7 +348,8 @@ func (bg *BlackjackGame) updateGameState() error {
 	embed := bg.createGameEmbed(false)
 	components := bg.View.GetComponents()
 
-	return utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+	// Subsequent updates should edit the original response
+	return utils.UpdateInteractionResponse(bg.Session, bg.Interaction, embed, components)
 }
 
 // createGameEmbed creates the Discord embed for the game state
