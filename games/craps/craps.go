@@ -441,40 +441,30 @@ func (g *Game) buildEmbed(outcome, rollDisplay string) *discordgo.MessageEmbed {
 	} else if g.TimedOut {
 		color = 0xF1C40F
 	}
-	pointStr := "—"
-	if g.Point != nil {
-		pointStr = fmt.Sprintf("%d", *g.Point)
-	}
 	layout := g.layoutString()
-	statusParts := []string{}
-	if g.TimedOut {
-		statusParts = append(statusParts, "Timed Out")
+	embed := utils.CreateBrandedEmbed(title, layout, color)
+	// Shooter field
+	shooter := fmt.Sprintf("<@%d>", g.BaseGame.UserID)
+	pointStr := "OFF"
+	if g.Point != nil {
+		pointStr = fmt.Sprintf("ON (%d)", *g.Point)
 	}
-	if g.AutoClosed {
-		statusParts = append(statusParts, "Auto Closed")
-	}
-	status := ""
-	if len(statusParts) > 0 {
-		status = "(" + strings.Join(statusParts, ", ") + ") "
-	}
-	netWord := ternary(g.SessionProfit >= 0, "Profit", "Loss")
-	header := fmt.Sprintf("%s**Point:** %s  •  **Net %s:** %s", status, pointStr, netWord, utils.FormatChips(abs64(g.SessionProfit)))
-	embed := utils.CreateBrandedEmbed(title, header+"\n"+layout, color)
-	fields := []*discordgo.MessageEmbedField{}
 	if rollDisplay != "" {
-		fields = append(fields, &discordgo.MessageEmbedField{Name: "Roll", Value: rollDisplay, Inline: true})
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Current Roll", Value: rollDisplay, Inline: true})
 	}
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Shooter", Value: shooter, Inline: true})
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Point", Value: pointStr, Inline: true})
+	// Outcome field includes profit line
 	if outcome != "" {
-		fields = append(fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: outcome, Inline: false})
+		netWord := ternary(g.SessionProfit > 0, "Profit", ternary(g.SessionProfit < 0, "Loss", "Push"))
+		profitLine := fmt.Sprintf("Total %s: %s.", netWord, utils.FormatChips(abs64(g.SessionProfit)))
+		outcome = outcome + "\n" + profitLine
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: outcome, Inline: false})
 	}
-	fields = append(fields, &discordgo.MessageEmbedField{Name: "Active Bets", Value: g.betSummary(), Inline: false})
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Your Bets", Value: g.betSummary(), Inline: false})
 	if pd := g.pendingSummary(); pd != "" {
-		fields = append(fields, &discordgo.MessageEmbedField{Name: "Pending Decisions", Value: pd, Inline: false})
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Pending Decisions", Value: pd, Inline: false})
 	}
-	if g.BaseGame.IsGameOver() {
-		fields = append(fields, &discordgo.MessageEmbedField{Name: "Final Chips", Value: fmt.Sprintf("%s %s", utils.FormatChips(g.UserData.Chips), utils.ChipsEmoji), Inline: false})
-	}
-	embed.Fields = fields
 	if g.BaseGame.IsGameOver() {
 		embed.Footer.Text += " | Game Over"
 	} else if g.TimedOut {
@@ -709,7 +699,7 @@ func HandleCrapsModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	betType := strings.TrimPrefix(custom, "craps_bet_modal_")
 	var amountStr string
-	for idx, row := range i.ModalSubmitData().Components { // robust extraction with pointer/value handling
+	for _, row := range i.ModalSubmitData().Components { // robust extraction with pointer/value handling
 		var ar discordgo.ActionsRow
 		switched := false
 		if v, ok := row.(discordgo.ActionsRow); ok {
@@ -722,15 +712,11 @@ func HandleCrapsModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if !switched {
 			continue
 		}
-		utils.BotLogf("CRAPS_MODAL", "row %d has %d components", idx, len(ar.Components))
-		for cidx, comp := range ar.Components {
+		for _, comp := range ar.Components {
 			if ti, ok := comp.(*discordgo.TextInput); ok {
-				utils.BotLogf("CRAPS_MODAL", "component %d type=TextInput id=%s value='%s'", cidx, ti.CustomID, ti.Value)
 				if ti.CustomID == "bet_amount" {
 					amountStr = strings.TrimSpace(ti.Value)
 				}
-			} else {
-				utils.BotLogf("CRAPS_MODAL", "component %d unexpected type %T", cidx, comp)
 			}
 		}
 	}
@@ -766,7 +752,6 @@ func HandleCrapsModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	amountStr = strings.ReplaceAll(amountStr, ",", "")
 	amountStr = strings.ReplaceAll(amountStr, "_", "")
 	amountStr = strings.Trim(amountStr, "`$")
-	utils.BotLogf("CRAPS_MODAL", "raw='%s' sanitized='%s'", original, amountStr)
 	// Parse amount using user chips
 	user, err := utils.GetCachedUser(userID)
 	if err != nil {
@@ -779,11 +764,9 @@ func HandleCrapsModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if err != nil {
 			msg = err.Error()
 		}
-		utils.BotLogf("CRAPS_MODAL", "parse error raw='%s' sanitized='%s' err=%v", original, amountStr, err)
 		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", msg+" ("+original+")", 0xFF0000), nil, true)
 		return
 	}
-	utils.BotLogf("CRAPS_MODAL", "parsed amt=%d from raw='%s'", amt, original)
 	if err := game.addBet(betType, amt); err != nil {
 		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Craps", err.Error(), 0xFF0000), nil, true)
 		return
