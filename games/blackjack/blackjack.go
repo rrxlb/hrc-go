@@ -19,15 +19,16 @@ var gamesMutex sync.RWMutex
 // BlackjackGame represents a blackjack game instance
 type BlackjackGame struct {
 	*utils.BaseGame
-	GameID       string
-	Bets         []int64
-	Deck         *utils.Deck
-	PlayerHands  []*utils.Hand
-	DealerHand   *utils.Hand
-	CurrentHand  int
-	InsuranceBet int64
-	Results      []GameResult
-	View         *utils.BlackjackView
+	GameID              string
+	Bets                []int64
+	Deck                *utils.Deck
+	PlayerHands         []*utils.Hand
+	DealerHand          *utils.Hand
+	CurrentHand         int
+	InsuranceBet        int64
+	Results             []GameResult
+	View                *utils.BlackjackView
+	OriginalInteraction *discordgo.InteractionCreate
 }
 
 // GameResult represents the result of a blackjack hand
@@ -44,16 +45,17 @@ func NewBlackjackGame(session *discordgo.Session, interaction *discordgo.Interac
 	gameID := fmt.Sprintf("blackjack_%d_%d", baseGame.UserID, time.Now().Unix())
 
 	game := &BlackjackGame{
-		BaseGame:     baseGame,
-		GameID:       gameID,
-		Bets:         []int64{bet},
-		Deck:         utils.NewDeck(utils.DeckCount, "blackjack"),
-		PlayerHands:  []*utils.Hand{utils.NewHand("blackjack")},
-		DealerHand:   utils.NewHand("blackjack"),
-		CurrentHand:  0,
-		InsuranceBet: 0,
-		Results:      make([]GameResult, 0),
-		View:         utils.NewBlackjackView(baseGame.UserID, gameID),
+		BaseGame:            baseGame,
+		GameID:              gameID,
+		Bets:                []int64{bet},
+		Deck:                utils.NewDeck(utils.DeckCount, "blackjack"),
+		PlayerHands:         []*utils.Hand{utils.NewHand("blackjack")},
+		DealerHand:          utils.NewHand("blackjack"),
+		CurrentHand:         0,
+		InsuranceBet:        0,
+		Results:             make([]GameResult, 0),
+		View:                utils.NewBlackjackView(baseGame.UserID, gameID),
+		OriginalInteraction: interaction,
 	}
 
 	return game
@@ -215,9 +217,17 @@ func (bg *BlackjackGame) finishGame() error {
 	embed := bg.createGameEmbed(true)
 	components := bg.View.DisableAllButtons()
 
-	// Edit original interaction response to show final state
-	if err := utils.UpdateInteractionResponse(bg.Session, bg.Interaction, embed, components); err != nil {
-		return err
+	// Decide update method based on interaction type (use original slash for edits)
+	var errUpdate error
+	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
+		// Component interaction: send update message
+		errUpdate = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+	} else {
+		// Slash command interaction: edit original response (use stored original interaction)
+		errUpdate = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+	}
+	if errUpdate != nil {
+		return errUpdate
 	}
 
 	// Clean up the game
@@ -348,8 +358,10 @@ func (bg *BlackjackGame) updateGameState() error {
 	embed := bg.createGameEmbed(false)
 	components := bg.View.GetComponents()
 
-	// Subsequent updates should edit the original response
-	return utils.UpdateInteractionResponse(bg.Session, bg.Interaction, embed, components)
+	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
+		return utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+	}
+	return utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
 }
 
 // createGameEmbed creates the Discord embed for the game state
