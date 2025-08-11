@@ -20,6 +20,7 @@ import (
 	craps "hrc-go/games/craps"
 	higherorlower "hrc-go/games/higher_or_lower"
 	roulette "hrc-go/games/roulette"
+	slots "hrc-go/games/slots"
 	threecardpoker "hrc-go/games/three_card_poker"
 	"hrc-go/utils"
 
@@ -227,6 +228,7 @@ func registerSlashCommands(s *discordgo.Session) error {
 		blackjack.RegisterBlackjackCommands(),
 		baccarat.RegisterBaccaratCommand(),
 		craps.RegisterCrapsCommand(),
+		slots.RegisterSlotsCommand(),
 		higherorlower.RegisterHigherOrLowerCommand(),
 		roulette.RegisterRouletteCommand(),
 		threecardpoker.RegisterThreeCardPokerCommand(),
@@ -289,6 +291,8 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			baccarat.HandleBaccaratCommand(s, i)
 		case "craps":
 			craps.HandleCrapsCommand(s, i)
+		case "slots":
+			slots.HandleSlotsCommand(s, i)
 		case "horl":
 			higherorlower.HandleHigherOrLowerCommand(s, i)
 		case "roulette":
@@ -343,6 +347,10 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	if strings.HasPrefix(customID, "tcp_") {
 		threecardpoker.HandleThreeCardPokerInteraction(s, i)
+	}
+
+	if strings.HasPrefix(customID, "slots_") {
+		slots.HandleSlotsInteraction(s, i)
 	}
 }
 
