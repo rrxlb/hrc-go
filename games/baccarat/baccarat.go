@@ -247,13 +247,13 @@ func baccaratResultEmbed(g *Game, newBalance int64, xpGain int64) *discordgo.Mes
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: strings.Join(lines, "\n"), Inline: false})
 	// Profit / Loss field naming
 	if g.Profit > 0 {
-		profitVal := fmt.Sprintf("+%s %s", utils.FormatChips(g.Profit), utils.ChipsEmoji)
+		profitVal := fmt.Sprintf("%s %s", utils.FormatChips(g.Profit), utils.ChipsEmoji)
 		// Show commission detail for banker wins
 		if g.Choice == "banker" && strings.Contains(strings.ToLower(g.ResultText), "banker wins") {
 			commission := int64(float64(g.Bet) * utils.BaccaratBankerCommission)
 			profitVal += fmt.Sprintf(" (5%% commission: -%s)", utils.FormatChips(commission))
 		}
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Profit", Value: profitVal, Inline: false})
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Winnings", Value: profitVal, Inline: false})
 	} else if g.Profit < 0 {
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Losses", Value: fmt.Sprintf("%s %s", utils.FormatChips(-g.Profit), utils.ChipsEmoji), Inline: false})
 	} else {
@@ -267,7 +267,7 @@ func baccaratResultEmbed(g *Game, newBalance int64, xpGain int64) *discordgo.Mes
 func joinCards(cards []utils.Card) string {
 	parts := make([]string, len(cards))
 	for i, c := range cards {
-		parts[i] = c.String()
+		parts[i] = "`" + c.String() + "`"
 	}
 	return strings.Join(parts, " ")
 }
