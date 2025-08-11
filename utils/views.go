@@ -3,8 +3,8 @@ package utils
 import (
 	"fmt"
 	"log"
-	"time"
 	"strconv"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -31,12 +31,12 @@ func (cm *ComponentManager) RegisterHandler(customID string, handler ComponentHa
 // HandleInteraction handles a component interaction
 func (cm *ComponentManager) HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) error {
 	customID := i.MessageComponentData().CustomID
-	
+
 	handler, exists := cm.handlers[customID]
 	if !exists {
 		return fmt.Errorf("no handler registered for component: %s", customID)
 	}
-	
+
 	return handler(s, i)
 }
 
@@ -76,11 +76,11 @@ func CreateButton(customID, label string, style discordgo.ButtonStyle, disabled 
 		Style:    style,
 		Disabled: disabled,
 	}
-	
+
 	if emoji != nil {
 		button.Emoji = emoji
 	}
-	
+
 	return button
 }
 
@@ -91,27 +91,27 @@ func CreateSelectMenu(customID, placeholder string, options []discordgo.SelectMe
 		Placeholder: placeholder,
 		Options:     options,
 	}
-	
+
 	if minValues != nil {
 		selectMenu.MinValues = minValues
 	}
-	
+
 	if maxValues != nil {
 		selectMenu.MaxValues = *maxValues
 	}
-	
+
 	return selectMenu
 }
 
 // BlackjackView creates a view for blackjack game
 type BlackjackView struct {
-	UserID     int64
-	GameID     string
-	CanHit     bool
-	CanStand   bool
-	CanDouble  bool
-	CanSplit   bool
-	CanInsure  bool
+	UserID    int64
+	GameID    string
+	CanHit    bool
+	CanStand  bool
+	CanDouble bool
+	CanSplit  bool
+	CanInsure bool
 }
 
 // NewBlackjackView creates a new blackjack view
@@ -130,7 +130,7 @@ func NewBlackjackView(userID int64, gameID string) *BlackjackView {
 // GetComponents returns the components for the blackjack view
 func (bv *BlackjackView) GetComponents() []discordgo.MessageComponent {
 	var buttons []discordgo.MessageComponent
-	
+
 	// Hit button
 	hitButton := CreateButton(
 		"blackjack_hit",
@@ -140,7 +140,7 @@ func (bv *BlackjackView) GetComponents() []discordgo.MessageComponent {
 		&discordgo.ComponentEmoji{Name: "🃏"},
 	)
 	buttons = append(buttons, hitButton)
-	
+
 	// Stand button
 	standButton := CreateButton(
 		"blackjack_stand",
@@ -150,7 +150,7 @@ func (bv *BlackjackView) GetComponents() []discordgo.MessageComponent {
 		&discordgo.ComponentEmoji{Name: "✋"},
 	)
 	buttons = append(buttons, standButton)
-	
+
 	// Double button
 	if bv.CanDouble {
 		doubleButton := CreateButton(
@@ -162,7 +162,7 @@ func (bv *BlackjackView) GetComponents() []discordgo.MessageComponent {
 		)
 		buttons = append(buttons, doubleButton)
 	}
-	
+
 	// Split button
 	if bv.CanSplit {
 		splitButton := CreateButton(
@@ -174,7 +174,7 @@ func (bv *BlackjackView) GetComponents() []discordgo.MessageComponent {
 		)
 		buttons = append(buttons, splitButton)
 	}
-	
+
 	// Insurance button
 	if bv.CanInsure {
 		insuranceButton := CreateButton(
@@ -186,7 +186,7 @@ func (bv *BlackjackView) GetComponents() []discordgo.MessageComponent {
 		)
 		buttons = append(buttons, insuranceButton)
 	}
-	
+
 	return []discordgo.MessageComponent{CreateActionRow(buttons...)}
 }
 
@@ -197,7 +197,7 @@ func (bv *BlackjackView) DisableAllButtons() []discordgo.MessageComponent {
 	bv.CanDouble = false
 	bv.CanSplit = false
 	bv.CanInsure = false
-	
+
 	return bv.GetComponents()
 }
 
@@ -257,7 +257,7 @@ func ConfirmationView(confirmID, cancelID string) []discordgo.MessageComponent {
 func PaginationView(prevID, nextID string, currentPage, totalPages int) []discordgo.MessageComponent {
 	prevDisabled := currentPage <= 1
 	nextDisabled := currentPage >= totalPages
-	
+
 	return []discordgo.MessageComponent{
 		CreateActionRow(
 			CreateButton(
@@ -294,13 +294,17 @@ func SendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreat
 	if ephemeral {
 		data.Flags = discordgo.MessageFlagsEphemeral
 	}
-	
+
 	response := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: data,
 	}
-	
-	return s.InteractionRespond(i.Interaction, response)
+
+	err := s.InteractionRespond(i.Interaction, response)
+	if err != nil {
+		log.Printf("SendInteractionResponse error (cmd=%s user=%s): %v", i.ApplicationCommandData().Name, i.Member.User.ID, err)
+	}
+	return err
 }
 
 // UpdateInteractionResponse updates an interaction response with new embed and components
@@ -309,7 +313,7 @@ func UpdateInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCre
 		Embeds:     &[]*discordgo.MessageEmbed{embed},
 		Components: &components,
 	}
-	
+
 	_, err := s.InteractionResponseEdit(i.Interaction, edit)
 	return err
 }
@@ -323,9 +327,9 @@ func SendFollowupMessage(s *discordgo.Session, i *discordgo.InteractionCreate, e
 	if ephemeral {
 		params.Flags = discordgo.MessageFlagsEphemeral
 	}
-	
+
 	_, err := s.FollowupMessageCreate(i.Interaction, true, params)
-	
+
 	return err
 }
 
@@ -335,12 +339,12 @@ func DeferInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCrea
 	if ephemeral {
 		data.Flags = discordgo.MessageFlagsEphemeral
 	}
-	
+
 	response := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 		Data: data,
 	}
-	
+
 	return s.InteractionRespond(i.Interaction, response)
 }
 
@@ -353,7 +357,7 @@ func UpdateComponentInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			Components: components,
 		},
 	}
-	
+
 	return s.InteractionRespond(i.Interaction, response)
 }
 
@@ -362,7 +366,7 @@ func AcknowledgeComponentInteraction(s *discordgo.Session, i *discordgo.Interact
 	response := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredMessageUpdate,
 	}
-	
+
 	return s.InteractionRespond(i.Interaction, response)
 }
 

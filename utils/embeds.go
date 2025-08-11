@@ -28,7 +28,7 @@ func CreateBrandedEmbed(title, description string, color int) *discordgo.Message
 			IconURL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753043816/HRC-final_ymqwfy.png",
 		},
 	}
-	
+
 	return embed
 }
 
@@ -42,12 +42,12 @@ func InsufficientChipsEmbed(requiredChips, currentBalance int64, betDescription 
 			FormatChips(requiredChips), ChipsEmoji),
 		0xFF0000, // Red color
 	)
-	
+
 	// Set thumbnail to match Python
 	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
 		URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753046175/ER2_fwidxb.png",
 	}
-	
+
 	// Add help text field like in Python
 	embed.Fields = []*discordgo.MessageEmbedField{
 		{
@@ -56,7 +56,7 @@ func InsufficientChipsEmbed(requiredChips, currentBalance int64, betDescription 
 			Inline: false,
 		},
 	}
-	
+
 	return embed
 }
 
@@ -102,20 +102,20 @@ func BlackjackGameEmbed(playerHands []HandData, dealerHand []string, dealerValue
 	} else {
 		color = 0x1E5631 // Casino Green
 	}
-	
+
 	embed := CreateBrandedEmbed("Blackjack", "", color)
-	
+
 	// Set thumbnail (matches Python)
 	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
 		URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753042166/3_vxurig.png",
 	}
-	
+
 	// Player Hands
 	for i, handData := range playerHands {
 		handStr := strings.Join(handData.Hand, " ")
 		score := handData.Score
 		isActive := handData.IsActive
-		
+
 		var title string
 		if len(playerHands) > 1 {
 			if isActive {
@@ -126,19 +126,19 @@ func BlackjackGameEmbed(playerHands []HandData, dealerHand []string, dealerValue
 		} else {
 			title = fmt.Sprintf("Your Hand - %d", score)
 		}
-		
+
 		// Add Ace clarification if needed
 		if hasAces {
 			handStr += " `(Aces can be 1 or 11)`"
 		}
-		
+
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   title,
 			Value:  fmt.Sprintf("`%s`", handStr),
 			Inline: false,
 		})
 	}
-	
+
 	// Dealer Hand
 	dealerHandStr := strings.Join(dealerHand, " ")
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
@@ -146,18 +146,18 @@ func BlackjackGameEmbed(playerHands []HandData, dealerHand []string, dealerValue
 		Value:  fmt.Sprintf("`%s`", dealerHandStr),
 		Inline: false,
 	})
-	
+
 	// Preserve original footer
 	originalFooterText := embed.Footer.Text
 	originalFooterIcon := embed.Footer.IconURL
-	
+
 	if gameOver {
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   "Outcome",
 			Value:  outcomeText,
 			Inline: false,
 		})
-		
+
 		if profit > 0 {
 			winnningsText := fmt.Sprintf("%s %s", FormatChips(profit), ChipsEmoji)
 			if strings.Contains(strings.ToLower(outcomeText), "blackjack") {
@@ -170,7 +170,7 @@ func BlackjackGameEmbed(playerHands []HandData, dealerHand []string, dealerValue
 				Value:  winnningsText,
 				Inline: true,
 			})
-			
+
 			// XP Gained would be handled in Python with premium settings check - simplified here
 			if xpGain > 0 {
 				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
@@ -186,13 +186,13 @@ func BlackjackGameEmbed(playerHands []HandData, dealerHand []string, dealerValue
 				Inline: true,
 			})
 		}
-		
+
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   "New Balance",
 			Value:  fmt.Sprintf("%s %s", FormatChips(newBalance), ChipsEmoji),
 			Inline: false,
 		})
-		
+
 		// Update footer for game over
 		embed.Footer = &discordgo.MessageEmbedFooter{
 			Text:    fmt.Sprintf("%s | Game Over", originalFooterText),
@@ -205,7 +205,7 @@ func BlackjackGameEmbed(playerHands []HandData, dealerHand []string, dealerValue
 			IconURL: originalFooterIcon,
 		}
 	}
-	
+
 	return embed
 }
 
@@ -216,7 +216,7 @@ func BlackjackGameEmbed(playerHands []HandData, dealerHand []string, dealerValue
 func GameResultEmbed(gameType string, bet, profit int64, userBefore, userAfter *User) *discordgo.MessageEmbed {
 	var title, description string
 	var color int
-	
+
 	if profit > 0 {
 		title = "🎉 You Won!"
 		description = fmt.Sprintf("Congratulations! You won **%s** %s", FormatChips(profit), ChipsEmoji)
@@ -230,9 +230,9 @@ func GameResultEmbed(gameType string, bet, profit int64, userBefore, userAfter *
 		description = "It's a tie! Your bet has been returned."
 		color = 0xF39C12 // Orange
 	}
-	
+
 	embed := CreateBrandedEmbed(title, description, color)
-	
+
 	// Add game details
 	embed.Fields = []*discordgo.MessageEmbedField{
 		{
@@ -251,14 +251,14 @@ func GameResultEmbed(gameType string, bet, profit int64, userBefore, userAfter *
 			Inline: true,
 		},
 	}
-	
+
 	// Add balance information
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 		Name:   "Balance",
 		Value:  fmt.Sprintf("%s %s → %s %s", FormatChips(userBefore.Chips), ChipsEmoji, FormatChips(userAfter.Chips), ChipsEmoji),
 		Inline: false,
 	})
-	
+
 	// Add XP information if gained
 	if userAfter.TotalXP > userBefore.TotalXP {
 		xpGained := userAfter.TotalXP - userBefore.TotalXP
@@ -267,7 +267,7 @@ func GameResultEmbed(gameType string, bet, profit int64, userBefore, userAfter *
 			Value:  fmt.Sprintf("+%d XP", xpGained),
 			Inline: true,
 		})
-		
+
 		// Check for rank up
 		beforeRank := getUserRank(userBefore.TotalXP)
 		afterRank := getUserRank(userAfter.TotalXP)
@@ -279,7 +279,7 @@ func GameResultEmbed(gameType string, bet, profit int64, userBefore, userAfter *
 			})
 		}
 	}
-	
+
 	return embed
 }
 
@@ -290,12 +290,12 @@ func GameResultEmbed(gameType string, bet, profit int64, userBefore, userAfter *
 func UserProfileEmbed(user *User, discordUser *discordgo.User) *discordgo.MessageEmbed {
 	rank := getUserRank(user.TotalXP)
 	nextRank := getNextRank(user.TotalXP)
-	
+
 	embed := CreateBrandedEmbed("👤 Player Profile", "", BotColor)
 	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
 		URL: discordUser.AvatarURL(""),
 	}
-	
+
 	// User info
 	embed.Fields = []*discordgo.MessageEmbedField{
 		{
@@ -314,14 +314,14 @@ func UserProfileEmbed(user *User, discordUser *discordgo.User) *discordgo.Messag
 			Inline: true,
 		},
 	}
-	
+
 	// Stats
 	totalGames := user.Wins + user.Losses
 	winRate := 0.0
 	if totalGames > 0 {
 		winRate = (float64(user.Wins) / float64(totalGames)) * 100
 	}
-	
+
 	embed.Fields = append(embed.Fields, []*discordgo.MessageEmbedField{
 		{
 			Name:   "Games Won",
@@ -349,19 +349,19 @@ func UserProfileEmbed(user *User, discordUser *discordgo.User) *discordgo.Messag
 			Inline: true,
 		},
 	}...)
-	
+
 	// Next rank progress
 	if nextRank != nil {
 		xpNeeded := int64(nextRank.XPRequired) - user.TotalXP
 		progressBar := createProgressBar(user.TotalXP, int64(rank.XPRequired), int64(nextRank.XPRequired), 10)
-		
+
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   fmt.Sprintf("Progress to %s %s", nextRank.Icon, nextRank.Name),
 			Value:  fmt.Sprintf("%s\n**%s** / **%s** XP (**%s** needed)", progressBar, FormatNumber(user.TotalXP), FormatNumber(int64(nextRank.XPRequired)), FormatNumber(xpNeeded)),
 			Inline: false,
 		})
 	}
-	
+
 	// Account age
 	accountAge := time.Since(user.CreatedAt)
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
@@ -369,7 +369,7 @@ func UserProfileEmbed(user *User, discordUser *discordgo.User) *discordgo.Messag
 		Value:  formatDuration(accountAge),
 		Inline: true,
 	})
-	
+
 	return embed
 }
 
@@ -383,7 +383,7 @@ func FormatNumber(num int64) string {
 	if len(str) <= 3 {
 		return str
 	}
-	
+
 	// Add commas for thousands
 	var result strings.Builder
 	for i, r := range str {
@@ -392,7 +392,7 @@ func FormatNumber(num int64) string {
 		}
 		result.WriteRune(r)
 	}
-	
+
 	return result.String()
 }
 
@@ -429,12 +429,12 @@ func getNextRank(totalXP int64) *Rank {
 			break
 		}
 	}
-	
+
 	nextLevel := currentLevel + 1
 	if nextRank, exists := Ranks[nextLevel]; exists {
 		return &nextRank
 	}
-	
+
 	return nil
 }
 
@@ -442,7 +442,7 @@ func createProgressBar(current, min, max int64, length int) string {
 	if max <= min {
 		return strings.Repeat("█", length)
 	}
-	
+
 	progress := float64(current-min) / float64(max-min)
 	if progress < 0 {
 		progress = 0
@@ -450,17 +450,17 @@ func createProgressBar(current, min, max int64, length int) string {
 	if progress > 1 {
 		progress = 1
 	}
-	
+
 	filled := int(progress * float64(length))
 	empty := length - filled
-	
+
 	return strings.Repeat("█", filled) + strings.Repeat("░", empty)
 }
 
 func formatDuration(d time.Duration) string {
 	days := int(d.Hours() / 24)
 	hours := int(d.Hours()) % 24
-	
+
 	if days > 0 {
 		return fmt.Sprintf("%d days, %d hours", days, hours)
 	}
@@ -510,6 +510,51 @@ func RouletteGameEmbed(state string, bets map[string]int64, resultNumber int, re
 	}
 	if state == "final" {
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", FormatChips(newBalance), ChipsEmoji), Inline: true})
+		if xpGain > 0 {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP Gained", Value: fmt.Sprintf("%s XP", FormatChips(xpGain)), Inline: true})
+		}
+		embed.Footer.Text += " | Game Over"
+	}
+	return embed
+}
+
+// ThreeCardPokerEmbed builds embeds for Three Card Poker states
+// state: initial | final | forced_end
+func ThreeCardPokerEmbed(state string, playerHand []string, dealerHand []string, playerEval string, dealerEval string, ante int64, pairPlus int64, playBet int64, outcome string, payoutLines []string, finalBalance int64, profit int64, xpGain int64) *discordgo.MessageEmbed {
+	title := "🃏 Three Card Poker"
+	color := BotColor
+	description := ""
+	if state == "initial" {
+		description = "Decide to Play or Fold."
+	}
+	if state == "final" || state == "forced_end" {
+		description = outcome
+		if profit > 0 {
+			color = 0x2ECC71
+		} else if profit < 0 {
+			color = 0xE74C3C
+		} else {
+			color = 0x95A5A6
+		}
+	}
+	embed := CreateBrandedEmbed(title, description, color)
+	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753042166/3_vxurig.png"}
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Your Hand", Value: fmt.Sprintf("`%s`\n**%s**", strings.Join(playerHand, " "), playerEval), Inline: false})
+	// Show dealer hand fully (Python version shows both from start)
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Dealer Hand", Value: fmt.Sprintf("`%s`\n**%s**", strings.Join(dealerHand, " "), dealerEval), Inline: false})
+	// Bets
+	betLines := []string{fmt.Sprintf("Ante: %s %s", FormatChips(ante), ChipsEmoji)}
+	if pairPlus > 0 {
+		betLines = append(betLines, fmt.Sprintf("Pair+ : %s %s", FormatChips(pairPlus), ChipsEmoji))
+	}
+	if playBet > 0 {
+		betLines = append(betLines, fmt.Sprintf("Play  : %s %s", FormatChips(playBet), ChipsEmoji))
+	}
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Bets", Value: strings.Join(betLines, "\n"), Inline: true})
+	if (state == "final" || state == "forced_end") && len(payoutLines) > 0 {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Payouts", Value: strings.Join(payoutLines, "\n"), Inline: false})
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Result", Value: fmt.Sprintf("%s%s %s", getProfitPrefix(profit), FormatChips(abs(profit)), ChipsEmoji), Inline: true})
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", FormatChips(finalBalance), ChipsEmoji), Inline: true})
 		if xpGain > 0 {
 			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP Gained", Value: fmt.Sprintf("%s XP", FormatChips(xpGain)), Inline: true})
 		}
