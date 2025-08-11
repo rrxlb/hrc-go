@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"hrc-go/cogs"
 	"hrc-go/utils"
 
 	"github.com/bwmarrin/discordgo"
@@ -56,6 +58,7 @@ func main() {
 	// Add event handlers
 	session.AddHandler(onReady)
 	session.AddHandler(onInteractionCreate)
+	session.AddHandler(onButtonInteraction)
 
 	// Open Discord connection
 	if err := session.Open(); err != nil {
@@ -118,6 +121,7 @@ func registerSlashCommands(s *discordgo.Session) error {
 			Name:        "balance",
 			Description: "Check your current chip balance",
 		},
+		cogs.RegisterBlackjackCommands(),
 	}
 
 	for _, command := range commands {
@@ -132,6 +136,10 @@ func registerSlashCommands(s *discordgo.Session) error {
 }
 
 func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
+	
 	switch i.ApplicationCommandData().Name {
 	case "ping":
 		handlePingCommand(s, i)
@@ -141,6 +149,21 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		handleProfileCommand(s, i)
 	case "balance":
 		handleBalanceCommand(s, i)
+	case "blackjack":
+		cogs.HandleBlackjackCommand(s, i)
+	}
+}
+
+func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionMessageComponent {
+		return
+	}
+	
+	customID := i.MessageComponentData().CustomID
+	
+	// Route button interactions to appropriate handlers
+	if strings.HasPrefix(customID, "blackjack_") {
+		cogs.HandleBlackjackInteraction(s, i)
 	}
 }
 
@@ -204,7 +227,7 @@ func handleInfoCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 			{
 				Name:   "Features",
-				Value:  "User System, Profile & Balance Commands\nComing Soon: Casino Games, Achievements",
+				Value:  "✅ User System & Profiles\n✅ Blackjack Game\n🔜 More Casino Games & Achievements",
 				Inline: false,
 			},
 		},
