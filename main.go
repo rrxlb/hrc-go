@@ -14,6 +14,7 @@ import (
 
 	blackjack "hrc-go/games/blackjack"
 	roulette "hrc-go/games/roulette"
+	threecardpoker "hrc-go/games/three_card_poker"
 	"hrc-go/utils"
 
 	"github.com/bwmarrin/discordgo"
@@ -22,6 +23,8 @@ import (
 var session *discordgo.Session
 var botStatus = "starting"
 var readyCh = make(chan struct{}, 1)
+
+const devGuildID = "1262162191923023882" // fast registration guild
 
 func main() {
 	// Start HTTP server for health checks
@@ -228,16 +231,17 @@ func registerSlashCommands(s *discordgo.Session) error {
 		},
 		blackjack.RegisterBlackjackCommands(),
 		roulette.RegisterRouletteCommand(),
+		threecardpoker.RegisterThreeCardPokerCommand(),
 	}
 
+	// Register as guild commands for instant updates
 	for _, command := range commands {
-		_, err := s.ApplicationCommandCreate(s.State.User.ID, "", command)
+		_, err := s.ApplicationCommandCreate(s.State.User.ID, devGuildID, command)
 		if err != nil {
-			return fmt.Errorf("failed to create command %s: %w", command.Name, err)
+			return fmt.Errorf("failed to create guild command %s: %w", command.Name, err)
 		}
 	}
-
-	log.Printf("Successfully registered %d slash commands", len(commands))
+	log.Printf("Registered %d guild slash commands in %s", len(commands), devGuildID)
 	return nil
 }
 
@@ -269,6 +273,8 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		blackjack.HandleBlackjackCommand(s, i)
 	case "roulette":
 		roulette.HandleRouletteCommand(s, i)
+	case "tcpoker":
+		threecardpoker.HandleThreeCardPokerCommand(s, i)
 	}
 }
 
@@ -286,6 +292,10 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	if strings.HasPrefix(customID, "roulette_") {
 		roulette.HandleRouletteInteraction(s, i)
+	}
+
+	if strings.HasPrefix(customID, "tcp_") {
+		threecardpoker.HandleThreeCardPokerInteraction(s, i)
 	}
 }
 

@@ -56,7 +56,8 @@ func (rg *RouletteGame) buildComponents() []discordgo.MessageComponent {
 		utils.CreateButton("roulette_bet_black", "Black", discordgo.PrimaryButton, false, &discordgo.ComponentEmoji{Name: "⬛"}),
 		utils.CreateButton("roulette_bet_odd", "Odd", discordgo.SecondaryButton, false, nil),
 		utils.CreateButton("roulette_bet_even", "Even", discordgo.SecondaryButton, false, nil),
-		utils.CreateButton("roulette_bet_single", "Single", discordgo.SecondaryButton, false, &discordgo.ComponentEmoji{Name: "#"}),
+		// Removed invalid '#' emoji (caused BUTTON_COMPONENT_INVALID_EMOJI); leaving without emoji
+		utils.CreateButton("roulette_bet_single", "Single", discordgo.SecondaryButton, false, nil),
 	}
 	row2 := []discordgo.MessageComponent{
 		utils.CreateButton("roulette_bet_1-18", "1-18", discordgo.SecondaryButton, false, nil),
