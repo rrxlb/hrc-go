@@ -467,48 +467,7 @@ func UpdateUser(userID int64, updates UserUpdateData) (*User, error) {
 	return user, nil
 }
 
-// Cache functionality
-var userCache = make(map[int64]*User)
-var cacheMutex sync.RWMutex
-
-// GetCachedUser retrieves user from cache or database
-func GetCachedUser(userID int64) (*User, error) {
-	// Check cache first
-	cacheMutex.RLock()
-	if user, exists := userCache[userID]; exists {
-		cacheMutex.RUnlock()
-		return user, nil
-	}
-	cacheMutex.RUnlock()
-	
-	// Get from database and cache it
-	user, err := GetUser(userID)
-	if err != nil {
-		return nil, err
-	}
-	
-	// Cache the user
-	cacheMutex.Lock()
-	userCache[userID] = user
-	cacheMutex.Unlock()
-	
-	return user, nil
-}
-
-// UpdateCachedUser updates user and cache
-func UpdateCachedUser(userID int64, updates UserUpdateData) (*User, error) {
-	user, err := UpdateUser(userID, updates)
-	if err != nil {
-		return nil, err
-	}
-	
-	// Update cache
-	cacheMutex.Lock()
-	userCache[userID] = user
-	cacheMutex.Unlock()
-	
-	return user, nil
-}
+// Note: Cache functions are now in cache.go to avoid duplicates
 
 // ParseBet parses a bet string and validates it
 func ParseBet(betStr string, userChips int64) (int64, error) {
