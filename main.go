@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
+
+	"hrc-go/utils"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -18,6 +21,16 @@ var botStatus = "starting"
 func main() {
 	// Start HTTP server for Railway health checks
 	go startHealthServer()
+
+	// Initialize database
+	if err := utils.SetupDatabase(); err != nil {
+		log.Printf("Database setup failed: %v", err)
+		log.Println("Bot will continue without database features")
+	} else {
+		log.Println("Database connected successfully")
+		// Ensure database cleanup on shutdown
+		defer utils.CloseDatabase()
+	}
 
 	// Get bot token from environment
 	token := os.Getenv("BOT_TOKEN")
@@ -97,6 +110,14 @@ func registerSlashCommands(s *discordgo.Session) error {
 			Name:        "info",
 			Description: "Get information about the bot",
 		},
+		{
+			Name:        "profile",
+			Description: "View your casino profile and stats",
+		},
+		{
+			Name:        "balance",
+			Description: "Check your current chip balance",
+		},
 	}
 
 	for _, command := range commands {
@@ -111,10 +132,15 @@ func registerSlashCommands(s *discordgo.Session) error {
 }
 
 func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.ApplicationCommandData().Name == "ping" {
+	switch i.ApplicationCommandData().Name {
+	case "ping":
 		handlePingCommand(s, i)
-	} else if i.ApplicationCommandData().Name == "info" {
+	case "info":
 		handleInfoCommand(s, i)
+	case "profile":
+		handleProfileCommand(s, i)
+	case "balance":
+		handleBalanceCommand(s, i)
 	}
 }
 
@@ -178,7 +204,7 @@ func handleInfoCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 			{
 				Name:   "Features",
-				Value:  "Coming Soon: Casino Games, User System, Achievements",
+				Value:  "User System, Profile & Balance Commands\nComing Soon: Casino Games, Achievements",
 				Inline: false,
 			},
 		},
@@ -186,6 +212,133 @@ func handleInfoCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: "High Rollers Club",
 		},
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
+}
+
+func handleProfileCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
+	username := i.Member.User.Username
+
+	// Get or create user
+	user, err := utils.GetUser(userID)
+	if err != nil {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ Error accessing user data. Database may be unavailable.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	// Get rank information
+	rankName, rankIcon, rankColor, nextRankXP := utils.GetRank(user.TotalXP)
+	
+	// Calculate win rate
+	totalGames := user.Wins + user.Losses
+	winRate := 0.0
+	if totalGames > 0 {
+		winRate = float64(user.Wins) / float64(totalGames) * 100
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title: fmt.Sprintf("🎰 %s's Casino Profile", username),
+		Color: rankColor,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "💰 Chips",
+				Value:  fmt.Sprintf("%d <:chips:1396988413151940629>", user.Chips),
+				Inline: true,
+			},
+			{
+				Name:   "🏆 Rank",
+				Value:  fmt.Sprintf("%s %s", rankIcon, rankName),
+				Inline: true,
+			},
+			{
+				Name:   "⭐ Total XP",
+				Value:  fmt.Sprintf("%d", user.TotalXP),
+				Inline: true,
+			},
+			{
+				Name:   "🎯 Games Won",
+				Value:  fmt.Sprintf("%d", user.Wins),
+				Inline: true,
+			},
+			{
+				Name:   "💔 Games Lost",
+				Value:  fmt.Sprintf("%d", user.Losses),
+				Inline: true,
+			},
+			{
+				Name:   "📊 Win Rate",
+				Value:  fmt.Sprintf("%.1f%%", winRate),
+				Inline: true,
+			},
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Casino Profile",
+		},
+	}
+
+	// Add prestige if > 0
+	if user.Prestige > 0 {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "🌟 Prestige",
+			Value:  fmt.Sprintf("Level %d", user.Prestige),
+			Inline: true,
+		})
+	}
+
+	// Add next rank progress if not max rank
+	if nextRankXP > user.TotalXP {
+		xpNeeded := nextRankXP - user.TotalXP
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "🚀 Next Rank",
+			Value:  fmt.Sprintf("%d XP needed", xpNeeded),
+			Inline: true,
+		})
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
+}
+
+func handleBalanceCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
+	username := i.Member.User.Username
+
+	// Get or create user
+	user, err := utils.GetUser(userID)
+	if err != nil {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ Error accessing user data. Database may be unavailable.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title: fmt.Sprintf("💰 %s's Balance", username),
+		Color: 0x5865F2,
+		Description: fmt.Sprintf("You currently have **%d** <:chips:1396988413151940629> chips", user.Chips),
+		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
