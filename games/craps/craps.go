@@ -489,7 +489,10 @@ func (g *Game) buildEmbed(outcome, rollDisplay string) *discordgo.MessageEmbed {
 		outcome = outcome + "\n" + profitLine
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: outcome, Inline: false})
 	}
-	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Your Bets", Value: g.betSummary(), Inline: false})
+	// Only show active bets while game is in progress (hide after final outcome)
+	if !g.BaseGame.IsGameOver() {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Your Bets", Value: g.betSummary(), Inline: false})
+	}
 	if pd := g.pendingSummary(); pd != "" {
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Pending Decisions", Value: pd, Inline: false})
 	}
