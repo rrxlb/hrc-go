@@ -82,18 +82,21 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		log.Printf("[slots] user fetch error=%v editErr=%v", err, editErr)
 		return
 	}
+	log.Printf("[slots] user fetched chips=%d xp=%d", user.Chips, user.TotalXP)
 	bet, err := utils.ParseBet(betStr, user.Chips)
 	if err != nil {
 		editErr := utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet error: %s", err.Error()), 0xFF0000), nil)
 		log.Printf("[slots] bet parse error=%v editErr=%v", err, editErr)
 		return
 	}
+	log.Printf("[slots] bet parsed raw=%d", bet)
 	adjusted, note := normalizeBetForPaylines(bet, user.Chips)
 	if adjusted == 0 {
 		editErr := utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet must be at least %d & divisible by %d", minBet, payLines), 0xFF0000), nil)
 		log.Printf("[slots] bet normalization failed editErr=%v", editErr)
 		return
 	}
+	log.Printf("[slots] bet normalized adjusted=%d note=%q", adjusted, note)
 	game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, BetNote: note, Rand: rand.New(rand.NewSource(time.Now().UnixNano())), UsedOriginal: true}
 	game.BaseGame.CountWinLossMinRatio = 0.20
 	if err := game.ValidateBet(); err != nil {
@@ -101,14 +104,17 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		log.Printf("[slots] validate bet error=%v editErr=%v", err, editErr)
 		return
 	}
+	log.Printf("[slots] bet validated")
 	if utils.JackpotMgr != nil {
 		utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, adjusted)
 	}
+	log.Printf("[slots] jackpot contribution done")
 	initial := game.buildEmbed("", 0, 0, false, 0)
 	if err := utils.EditOriginalInteraction(s, i, initial, nil); err != nil {
 		log.Printf("[slots] initial edit failed: %v", err)
 		return
 	}
+	log.Printf("[slots] initial edit success")
 	// Fetch message ID for animation
 	if orig, err := s.InteractionResponse(i.Interaction); err == nil {
 		game.MessageID = orig.ID
@@ -118,6 +124,7 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		log.Printf("[slots] failed to get original response: %v", err)
 		return
 	}
+	log.Printf("[slots] starting play()")
 	game.play()
 	log.Printf("[slots] play finished totalDuration=%dms", time.Since(start).Milliseconds())
 }
@@ -169,6 +176,7 @@ func (g *Game) play() {
 		g.ChannelID = msg.ChannelID
 		log.Printf("[slots] obtained message via followup id=%s", g.MessageID)
 	}
+	log.Printf("[slots] creating reels")
 	final := g.createReels()
 	log.Printf("[slots] reels generated user=%d symbols=%s", g.UserID, formatReels(final))
 	g.animateSpin(final)
