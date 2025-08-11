@@ -180,6 +180,28 @@ func HandleCrapsButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 }
 
+// HandleCrapsSelect handles bet selection from select menu
+func HandleCrapsSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionMessageComponent {
+		return
+	}
+	data := i.MessageComponentData()
+	if data.CustomID != "craps_bet_select" || len(data.Values) == 0 {
+		return
+	}
+	userID, _ := utils.ParseUserID(i.Member.User.ID)
+	game, ok := activeGames[userID]
+	if !ok {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Craps", "No active game.", 0xFF0000), nil, true)
+		return
+	}
+	betType := data.Values[0]
+	// Open modal for amount
+	modal := &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: fmt.Sprintf("craps_bet_modal_%s", betType), Title: fmt.Sprintf("Bet Amount - %s", formatBetKey(betType)), Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{&discordgo.TextInput{CustomID: "bet_amount", Label: "Enter amount (e.g. 500, 5k, half, all)", Style: discordgo.TextInputShort, Placeholder: "Amount", Required: true}}}}}}
+	_ = s.InteractionRespond(i.Interaction, modal)
+	game.updateLastAction()
+}
+
 // addBet adds a bet if allowed
 func (g *Game) addBet(betType string, amount int64) error {
 	if _, ok := g.Bets[betType]; ok {
@@ -456,8 +478,14 @@ func (g *Game) buildEmbed(outcome, rollDisplay string) *discordgo.MessageEmbed {
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Point", Value: pointStr, Inline: true})
 	// Outcome field includes profit line
 	if outcome != "" {
-		netWord := ternary(g.SessionProfit > 0, "Profit", ternary(g.SessionProfit < 0, "Loss", "Push"))
-		profitLine := fmt.Sprintf("Total %s: %s.", netWord, utils.FormatChips(abs64(g.SessionProfit)))
+		netWord := ternary(g.SessionProfit > 0, "Net Profit", ternary(g.SessionProfit < 0, "Net Loss", "Push"))
+		amount := utils.FormatChips(abs64(g.SessionProfit)) + " " + utils.ChipsEmoji
+		if g.SessionProfit > 0 {
+			amount = "+" + amount
+		} else if g.SessionProfit < 0 {
+			amount = "-" + amount
+		}
+		profitLine := fmt.Sprintf("**%s:** %s", netWord, amount)
 		outcome = outcome + "\n" + profitLine
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: outcome, Inline: false})
 	}
@@ -498,25 +526,35 @@ func (g *Game) components() []discordgo.MessageComponent {
 			utils.CreateButton("craps_resume", "Resume", discordgo.SuccessButton, false, nil),
 		)}
 	}
-	row1 := utils.CreateActionRow(
+	betDisabled := g.Point == nil // disable bet select until point established
+	selectOptions := []discordgo.SelectMenuOption{
+		{Label: "Field", Value: "field", Description: "Field bet"},
+		{Label: "Place 4", Value: "place_4"},
+		{Label: "Place 5", Value: "place_5"},
+		{Label: "Place 6", Value: "place_6"},
+		{Label: "Place 8", Value: "place_8"},
+		{Label: "Place 9", Value: "place_9"},
+		{Label: "Place 10", Value: "place_10"},
+		{Label: "Hard 4", Value: "hard_4"},
+		{Label: "Hard 6", Value: "hard_6"},
+		{Label: "Hard 8", Value: "hard_8"},
+		{Label: "Hard 10", Value: "hard_10"},
+		{Label: "Don't Pass", Value: "dont_pass", Description: "Don't Pass (come-out only)"},
+	}
+	min1 := 1
+	max1 := 1
+	placeholder := ternary(betDisabled, "Bet (point needed)", "Choose bet")
+	menuComp := utils.CreateSelectMenu("craps_bet_select", placeholder, selectOptions, &min1, &max1)
+	// need to set Disabled flag if betDisabled
+	if sm, ok := menuComp.(discordgo.SelectMenu); ok {
+		sm.Disabled = betDisabled
+		menuComp = sm
+	}
+	row := utils.CreateActionRow(
 		utils.CreateButton("craps_roll", "Roll", discordgo.SuccessButton, false, &discordgo.ComponentEmoji{Name: "🎲"}),
-		utils.CreateButton("craps_bet_field", "Field", discordgo.PrimaryButton, false, nil),
-		utils.CreateButton("craps_bet_come", "Come", discordgo.SecondaryButton, g.Phase != phasePoint, nil),
-		utils.CreateButton("craps_bet_dont_come", "Don't Come", discordgo.SecondaryButton, g.Phase != phasePoint, nil),
+		menuComp,
 	)
-	row2 := utils.CreateActionRow(
-		utils.CreateButton("craps_bet_place_6", "Place 6", discordgo.SecondaryButton, g.Phase != phasePoint, nil),
-		utils.CreateButton("craps_bet_place_8", "Place 8", discordgo.SecondaryButton, g.Phase != phasePoint, nil),
-		utils.CreateButton("craps_bet_place_5", "Place 5", discordgo.SecondaryButton, g.Phase != phasePoint, nil),
-		utils.CreateButton("craps_bet_place_9", "Place 9", discordgo.SecondaryButton, g.Phase != phasePoint, nil),
-	)
-	row3 := utils.CreateActionRow(
-		utils.CreateButton("craps_bet_hard_4", "Hard 4", discordgo.SecondaryButton, false, nil),
-		utils.CreateButton("craps_bet_hard_6", "Hard 6", discordgo.SecondaryButton, false, nil),
-		utils.CreateButton("craps_bet_hard_8", "Hard 8", discordgo.SecondaryButton, false, nil),
-		utils.CreateButton("craps_bet_hard_10", "Hard 10", discordgo.SecondaryButton, false, nil),
-	)
-	return []discordgo.MessageComponent{row1, row2, row3}
+	return []discordgo.MessageComponent{row}
 }
 
 // updateMessage updates or edits interaction message after a roll or bet

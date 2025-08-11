@@ -242,12 +242,20 @@ func registerSlashCommands(s *discordgo.Session) error {
 		return nil
 	}
 	registeredGuild, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, devGuildID, commands)
-	if err != nil { return fmt.Errorf("guild bulk overwrite failed: %w", err) }
+	if err != nil {
+		return fmt.Errorf("guild bulk overwrite failed: %w", err)
+	}
 	log.Printf("Registered/updated %d guild commands (hash %s)", len(registeredGuild), newHash[:8])
 	// Global sync (may take up to an hour to propagate)
 	registeredGlobal, gErr := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", commands)
-	if gErr != nil { log.Printf("Global command sync failed: %v", gErr) } else { log.Printf("Queued %d global commands for sync", len(registeredGlobal)) }
-	if err := os.WriteFile(hashFile, []byte(newHash), 0644); err != nil { log.Printf("Failed to write command hash: %v", err) }
+	if gErr != nil {
+		log.Printf("Global command sync failed: %v", gErr)
+	} else {
+		log.Printf("Queued %d global commands for sync", len(registeredGlobal))
+	}
+	if err := os.WriteFile(hashFile, []byte(newHash), 0644); err != nil {
+		log.Printf("Failed to write command hash: %v", err)
+	}
 	return nil
 }
 
@@ -318,7 +326,11 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 
 	if strings.HasPrefix(customID, "craps_") {
-		craps.HandleCrapsButton(s, i)
+		if customID == "craps_bet_select" { // select menu handled elsewhere
+			craps.HandleCrapsSelect(s, i)
+		} else {
+			craps.HandleCrapsButton(s, i)
+		}
 	}
 
 	if strings.HasPrefix(customID, "tcp_") {
