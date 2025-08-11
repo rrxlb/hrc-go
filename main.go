@@ -1,7 +1,10 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -47,34 +50,8 @@ func main() {
 	defer utils.CloseCache()
 	log.Println("Cache system initialized")
 
-	// Initialize achievement system
-	if err := utils.InitializeAchievementManager(); err != nil {
-		log.Printf("Achievement manager initialization failed: %v", err)
-		log.Println("Bot will continue without achievement features")
-	} else {
-		log.Println("Achievement system initialized")
-	}
-
-	// Initialize jackpot system (non-blocking but quieter)
-	jackpotInitCh := make(chan error, 1)
-	go func() { jackpotInitCh <- utils.InitializeJackpotManager() }()
-	select {
-	case err := <-jackpotInitCh:
-		if err != nil {
-			log.Printf("Jackpot manager init failed: %v", err)
-		} else {
-			log.Println("Jackpot system initialized")
-		}
-	case <-time.After(3 * time.Second):
-		log.Println("Jackpot init continuing in background...")
-		go func() {
-			if err := <-jackpotInitCh; err != nil {
-				log.Printf("Jackpot manager late init error: %v", err)
-			} else {
-				log.Println("Jackpot system initialized (late)")
-			}
-		}()
-	}
+	// Heavy subsystems deferred until after READY to reduce startup latency
+	log.Println("Deferring achievement & jackpot initialization until READY...")
 
 	// (Game manager initialization removed; legacy interface cleanup)
 
@@ -187,10 +164,25 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 		log.Printf("Failed to update status: %v", err)
 	}
 
-	// Register slash commands
-	if err := registerSlashCommands(s); err != nil {
-		log.Printf("Failed to register slash commands: %v", err)
-	}
+	go func() {
+		start := time.Now()
+		if err := registerSlashCommands(s); err != nil {
+			log.Printf("Failed to register slash commands: %v", err)
+		} else {
+			log.Printf("Slash commands ready in %dms", time.Since(start).Milliseconds())
+		}
+		// Lazy init heavy systems
+		if err := utils.InitializeAchievementManager(); err != nil {
+			log.Printf("Achievement manager init failed (lazy): %v", err)
+		} else {
+			log.Println("Achievement system initialized (lazy)")
+		}
+		if err := utils.InitializeJackpotManager(); err != nil {
+			log.Printf("Jackpot manager init failed (lazy): %v", err)
+		} else {
+			log.Println("Jackpot system initialized (lazy)")
+		}
+	}()
 }
 
 func registerSlashCommands(s *discordgo.Session) error {
@@ -238,14 +230,24 @@ func registerSlashCommands(s *discordgo.Session) error {
 		threecardpoker.RegisterThreeCardPokerCommand(),
 	}
 
-	// Register as guild commands for instant updates
-	for _, command := range commands {
-		_, err := s.ApplicationCommandCreate(s.State.User.ID, devGuildID, command)
-		if err != nil {
-			return fmt.Errorf("failed to create guild command %s: %w", command.Name, err)
-		}
+	// Hash commands to skip unnecessary overwrites
+	data, _ := json.Marshal(commands)
+	sha := sha256.Sum256(data)
+	newHash := hex.EncodeToString(sha[:])
+	const hashFile = ".commands.hash"
+	oldHashBytes, _ := os.ReadFile(hashFile)
+	oldHash := strings.TrimSpace(string(oldHashBytes))
+	if oldHash == newHash {
+		log.Println("Commands unchanged; skipping registration")
+		return nil
 	}
-	log.Printf("Registered %d guild slash commands in %s", len(commands), devGuildID)
+	registeredGuild, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, devGuildID, commands)
+	if err != nil { return fmt.Errorf("guild bulk overwrite failed: %w", err) }
+	log.Printf("Registered/updated %d guild commands (hash %s)", len(registeredGuild), newHash[:8])
+	// Global sync (may take up to an hour to propagate)
+	registeredGlobal, gErr := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", commands)
+	if gErr != nil { log.Printf("Global command sync failed: %v", gErr) } else { log.Printf("Queued %d global commands for sync", len(registeredGlobal)) }
+	if err := os.WriteFile(hashFile, []byte(newHash), 0644); err != nil { log.Printf("Failed to write command hash: %v", err) }
 	return nil
 }
 
