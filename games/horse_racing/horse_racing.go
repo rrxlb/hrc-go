@@ -425,14 +425,20 @@ func runRace(s *discordgo.Session, r *Race) {
 		default:
 			text = middleText
 		}
-		// advance horses using odds-influenced movement from Python
+		// advance horses using odds-influenced movement; ensure visible progress
+		movedAny := false
 		for _, h := range r.Horses {
 			if h.Position >= trackLength-1 {
 				continue
 			}
 			moveChance := (1.0 / float64(h.Odds)) * 0.5
+			p := 0.1 + moveChance
+			// Ensure a reasonable floor so movement is visible even for long odds
+			if p < 0.35 {
+				p = 0.35
+			}
 			baseMove := 0
-			if rng.Float64() < (0.1 + moveChance) {
+			if rng.Float64() < p {
 				baseMove = 1
 			}
 			bonusMove := 0
@@ -445,6 +451,16 @@ func runRace(s *discordgo.Session, r *Race) {
 			}
 			if h.Position >= trackLength-1 && winner == nil {
 				winner = h
+			}
+			if baseMove > 0 || bonusMove > 0 {
+				movedAny = true
+			}
+		}
+		// If no horse moved this tick, randomly nudge one forward to keep the race visually active
+		if !movedAny {
+			idx := rng.Intn(len(r.Horses))
+			if r.Horses[idx].Position < trackLength-1 {
+				r.Horses[idx].Position++
 			}
 		}
 		// build embed
@@ -468,7 +484,7 @@ func runRace(s *discordgo.Session, r *Race) {
 			break
 		}
 		step++
-		time.Sleep(1500 * time.Millisecond)
+		time.Sleep(800 * time.Millisecond)
 	}
 	// finalize and payout
 	if winner == nil { // fallback by position
