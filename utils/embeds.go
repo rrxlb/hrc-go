@@ -548,29 +548,36 @@ func ThreeCardPokerEmbed(state string, playerHand []string, dealerHand []string,
 	}
 	embed := CreateBrandedEmbed(title, description, color)
 	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753042166/3_vxurig.png"}
-	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Your Hand", Value: fmt.Sprintf("`%s`\n**%s**", strings.Join(playerHand, " "), playerEval), Inline: false})
-	// Hide dealer hand until final to match desired behavior
+	// Card fields (side-by-side)
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Your Hand", Value: fmt.Sprintf("`%s`\n%s", strings.Join(playerHand, " "), playerEval), Inline: true})
 	if state == "initial" {
-		masked := "[Hidden] [Hidden] [Hidden]"
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Dealer Hand", Value: masked + "\n**???**", Inline: false})
+		masked := "?? ?? ??"
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Dealer's Hand", Value: fmt.Sprintf("`%s`\n%s", masked, "??"), Inline: true})
 	} else {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Dealer Hand", Value: fmt.Sprintf("`%s`\n**%s**", strings.Join(dealerHand, " "), dealerEval), Inline: false})
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Dealer's Hand", Value: fmt.Sprintf("`%s`\n%s", strings.Join(dealerHand, " "), dealerEval), Inline: true})
 	}
-	// Bets
-	betLines := []string{fmt.Sprintf("Ante: %s %s", FormatChips(ante), ChipsEmoji)}
-	if pairPlus > 0 {
-		betLines = append(betLines, fmt.Sprintf("Pair+ : %s %s", FormatChips(pairPlus), ChipsEmoji))
+
+	// Bets only shown during initial decision phase
+	if state == "initial" {
+		betLines := []string{fmt.Sprintf("Ante: %s %s", FormatChips(ante), ChipsEmoji)}
+		if pairPlus > 0 {
+			betLines = append(betLines, fmt.Sprintf("Pair+: %s %s", FormatChips(pairPlus), ChipsEmoji))
+		}
+		if playBet > 0 {
+			betLines = append(betLines, fmt.Sprintf("Play: %s %s", FormatChips(playBet), ChipsEmoji))
+		}
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Bets", Value: strings.Join(betLines, "\n"), Inline: false})
 	}
-	if playBet > 0 {
-		betLines = append(betLines, fmt.Sprintf("Play  : %s %s", FormatChips(playBet), ChipsEmoji))
-	}
-	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Bets", Value: strings.Join(betLines, "\n"), Inline: true})
-	if (state == "final" || state == "forced_end") && len(payoutLines) > 0 {
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Payouts", Value: strings.Join(payoutLines, "\n"), Inline: false})
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Result", Value: fmt.Sprintf("%s%s %s", getProfitPrefix(profit), FormatChips(abs(profit)), ChipsEmoji), Inline: true})
+
+	if state == "final" || state == "forced_end" {
+		// Outcome field
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Outcome", Value: outcome, Inline: false})
+		// Profit & Balance fields
+		profitVal := fmt.Sprintf("%s%s %s", getProfitPrefix(profit), FormatChips(abs(profit)), ChipsEmoji)
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Profit", Value: profitVal, Inline: true})
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "New Balance", Value: fmt.Sprintf("%s %s", FormatChips(finalBalance), ChipsEmoji), Inline: true})
-		if xpGain > 0 {
-			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "XP Gained", Value: fmt.Sprintf("%s XP", FormatChips(xpGain)), Inline: true})
+		if len(payoutLines) > 0 {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Payouts", Value: strings.Join(payoutLines, "\n"), Inline: false})
 		}
 		embed.Footer.Text += " | Game Over"
 	}
