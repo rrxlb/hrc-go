@@ -96,28 +96,37 @@ func HandleRouletteInteraction(s *discordgo.Session, i *discordgo.InteractionCre
 	}
 	if strings.HasPrefix(cid, "roulette_bet_") {
 		betType := strings.TrimPrefix(cid, "roulette_bet_")
+		// Open modal for ALL bet types so user selects amount (and number for single)
+		modalID := "roulette_bet_modal_" + betType
+		components := []discordgo.MessageComponent{}
+		// Wager input (common)
+		wagerInput := &discordgo.TextInput{
+			CustomID:    "wager",
+			Label:       "Bet Amount",
+			Style:       discordgo.TextInputShort,
+			Placeholder: "e.g. 100, 5k, half, all",
+			Required:    true,
+		}
 		if betType == "single" {
-			betType = "single_17"
+			// Add number input
+			numberInput := &discordgo.TextInput{
+				CustomID:    "number",
+				Label:       "Number (0-36)",
+				Style:       discordgo.TextInputShort,
+				Placeholder: "e.g. 17",
+				Required:    true,
+			}
+			components = append(components, utils.CreateActionRow(numberInput))
 		}
-		user, err := utils.GetCachedUser(userID)
-		if err != nil {
-			utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", "Failed to load user.", 0xFF0000), nil, true)
-			return
-		}
-		remaining := user.Chips
-		for _, v := range game.Bets {
-			remaining -= v
-		}
-		if remaining <= 0 {
-			utils.SendInteractionResponse(s, i, utils.InsufficientChipsEmbed(1, user.Chips, "another bet"), nil, true)
-			return
-		}
-		wager := int64(100)
-		if wager > remaining {
-			wager = remaining
-		}
-		game.Bets[betType] = wager
-		utils.UpdateComponentInteraction(s, i, utils.RouletteGameEmbed("betting", game.Bets, 0, "", 0, 0, 0), game.buildComponents())
+		components = append(components, utils.CreateActionRow(wagerInput))
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseModal,
+			Data: &discordgo.InteractionResponseData{
+				CustomID:   modalID,
+				Title:      "Place " + strings.Title(strings.ReplaceAll(betType, "_", " ")) + " Bet",
+				Components: components,
+			},
+		})
 	}
 }
 
@@ -174,11 +183,14 @@ func HandleRouletteModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	// Extract wager input value
 	var wagerStr string
+	var numberStr string
 	for _, comp := range i.ModalSubmitData().Components { // each is an action row
 		if row, ok := comp.(*discordgo.ActionsRow); ok {
 			for _, inner := range row.Components {
 				if ti, ok := inner.(*discordgo.TextInput); ok && ti.CustomID == "wager" {
 					wagerStr = ti.Value
+				} else if ti, ok := inner.(*discordgo.TextInput); ok && ti.CustomID == "number" {
+					numberStr = ti.Value
 				}
 			}
 		}
@@ -206,7 +218,21 @@ func HandleRouletteModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		utils.SendInteractionResponse(s, i, utils.InsufficientChipsEmbed(betAmount, user.Chips, "that wager"), nil, true)
 		return
 	}
-	game.Bets[betType] = betAmount
+	// If single bet, validate number and adjust betType
+	if betType == "single" {
+		if numberStr == "" {
+			utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", "No number provided for single bet.", 0xFF0000), nil, true)
+			return
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(numberStr))
+		if err != nil || n < 0 || n > 36 {
+			utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", "Invalid number (0-36).", 0xFF0000), nil, true)
+			return
+		}
+		betType = "single_" + strconv.Itoa(n)
+	}
+	// Accumulate if user places same bet multiple times
+	game.Bets[betType] += betAmount
 	utils.UpdateComponentInteraction(s, i, utils.RouletteGameEmbed("betting", game.Bets, 0, "", 0, 0, 0), game.buildComponents())
 }
 func (rg *RouletteGame) calculateProfit() int64 {
