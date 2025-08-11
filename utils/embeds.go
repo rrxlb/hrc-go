@@ -540,8 +540,13 @@ func ThreeCardPokerEmbed(state string, playerHand []string, dealerHand []string,
 	embed := CreateBrandedEmbed(title, description, color)
 	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753042166/3_vxurig.png"}
 	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Your Hand", Value: fmt.Sprintf("`%s`\n**%s**", strings.Join(playerHand, " "), playerEval), Inline: false})
-	// Show dealer hand fully (Python version shows both from start)
-	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Dealer Hand", Value: fmt.Sprintf("`%s`\n**%s**", strings.Join(dealerHand, " "), dealerEval), Inline: false})
+	// Hide dealer hand until final to match desired behavior
+	if state == "initial" {
+		masked := "[Hidden] [Hidden] [Hidden]"
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Dealer Hand", Value: masked + "\n**???**", Inline: false})
+	} else {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{Name: "Dealer Hand", Value: fmt.Sprintf("`%s`\n**%s**", strings.Join(dealerHand, " "), dealerEval), Inline: false})
+	}
 	// Bets
 	betLines := []string{fmt.Sprintf("Ante: %s %s", FormatChips(ante), ChipsEmoji)}
 	if pairPlus > 0 {

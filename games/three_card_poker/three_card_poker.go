@@ -102,7 +102,8 @@ func (g *TCPGame) start(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	g.DealerHand = g.Deck.DealMultiple(3)
 	g.PlayerEval = evaluateThreeCardHand(g.PlayerHand)
 	g.DealerEval = evaluateThreeCardHand(g.DealerHand)
-	embed := utils.ThreeCardPokerEmbed("initial", cardsToStrings(g.PlayerHand), cardsToStrings(g.DealerHand), g.PlayerEval.Name, g.DealerEval.Name, g.Bet, g.PairPlusBet, 0, "", nil, 0, 0, 0)
+	// Pass placeholder dealer eval during initial state (will be revealed on finish)
+	embed := utils.ThreeCardPokerEmbed("initial", cardsToStrings(g.PlayerHand), cardsToStrings(g.DealerHand), g.PlayerEval.Name, "Hidden", g.Bet, g.PairPlusBet, 0, "", nil, 0, 0, 0)
 	utils.SendFollowupMessage(s, i, embed, g.buildComponents(), false)
 }
 

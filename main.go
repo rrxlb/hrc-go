@@ -246,35 +246,41 @@ func registerSlashCommands(s *discordgo.Session) error {
 }
 
 func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.Type != discordgo.InteractionApplicationCommand {
+	// Slash commands
+	if i.Type == discordgo.InteractionApplicationCommand {
+		switch i.ApplicationCommandData().Name {
+		case "ping":
+			handlePingCommand(s, i)
+		case "info":
+			handleInfoCommand(s, i)
+		case "profile":
+			handleProfileCommand(s, i)
+		case "balance":
+			handleBalanceCommand(s, i)
+		case "hourly":
+			handleBonusCommand(s, i, utils.BonusHourly)
+		case "daily":
+			handleBonusCommand(s, i, utils.BonusDaily)
+		case "weekly":
+			handleBonusCommand(s, i, utils.BonusWeekly)
+		case "cooldowns":
+			handleCooldownsCommand(s, i)
+		case "claimall":
+			handleClaimAllCommand(s, i)
+		case "blackjack":
+			blackjack.HandleBlackjackCommand(s, i)
+		case "roulette":
+			roulette.HandleRouletteCommand(s, i)
+		case "tcpoker":
+			threecardpoker.HandleThreeCardPokerCommand(s, i)
+		}
 		return
 	}
-
-	switch i.ApplicationCommandData().Name {
-	case "ping":
-		handlePingCommand(s, i)
-	case "info":
-		handleInfoCommand(s, i)
-	case "profile":
-		handleProfileCommand(s, i)
-	case "balance":
-		handleBalanceCommand(s, i)
-	case "hourly":
-		handleBonusCommand(s, i, utils.BonusHourly)
-	case "daily":
-		handleBonusCommand(s, i, utils.BonusDaily)
-	case "weekly":
-		handleBonusCommand(s, i, utils.BonusWeekly)
-	case "cooldowns":
-		handleCooldownsCommand(s, i)
-	case "claimall":
-		handleClaimAllCommand(s, i)
-	case "blackjack":
-		blackjack.HandleBlackjackCommand(s, i)
-	case "roulette":
-		roulette.HandleRouletteCommand(s, i)
-	case "tcpoker":
-		threecardpoker.HandleThreeCardPokerCommand(s, i)
+	// Modal submissions
+	if i.Type == discordgo.InteractionModalSubmit {
+		if strings.HasPrefix(i.ModalSubmitData().CustomID, "roulette_bet_modal_") {
+			roulette.HandleRouletteModal(s, i)
+		}
 	}
 }
 

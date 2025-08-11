@@ -52,6 +52,7 @@ func (rg *RouletteGame) buildComponents() []discordgo.MessageComponent {
 		return nil
 	}
 	row1 := []discordgo.MessageComponent{
+		// Even-money bets now open a modal to specify wager amount
 		utils.CreateButton("roulette_bet_red", "Red", discordgo.PrimaryButton, false, &discordgo.ComponentEmoji{Name: "🟥"}),
 		utils.CreateButton("roulette_bet_black", "Black", discordgo.PrimaryButton, false, &discordgo.ComponentEmoji{Name: "⬛"}),
 		utils.CreateButton("roulette_bet_odd", "Odd", discordgo.SecondaryButton, false, nil),
@@ -155,6 +156,59 @@ func (rg *RouletteGame) totalBet() int64 {
 	return t
 }
 
+// HandleRouletteModal processes wager inputs from modal submissions for even-money bets
+func HandleRouletteModal(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionModalSubmit {
+		return
+	}
+	customID := i.ModalSubmitData().CustomID
+	if !strings.HasPrefix(customID, "roulette_bet_modal_") {
+		return
+	}
+	betType := strings.TrimPrefix(customID, "roulette_bet_modal_")
+	userID, _ := utils.ParseUserID(i.Member.User.ID)
+	game, exists := activeRouletteGames[userID]
+	if !exists {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Roulette", "No active roulette game.", 0xFF0000), nil, true)
+		return
+	}
+	// Extract wager input value
+	var wagerStr string
+	for _, comp := range i.ModalSubmitData().Components { // each is an action row
+		if row, ok := comp.(*discordgo.ActionsRow); ok {
+			for _, inner := range row.Components {
+				if ti, ok := inner.(*discordgo.TextInput); ok && ti.CustomID == "wager" {
+					wagerStr = ti.Value
+				}
+			}
+		}
+	}
+	if wagerStr == "" {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", "No wager provided.", 0xFF0000), nil, true)
+		return
+	}
+	user, err := utils.GetCachedUser(userID)
+	if err != nil {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", "Failed to load user.", 0xFF0000), nil, true)
+		return
+	}
+	// Remaining chips after existing bets
+	remaining := user.Chips
+	for _, v := range game.Bets {
+		remaining -= v
+	}
+	betAmount, err := utils.ParseBet(wagerStr, user.Chips)
+	if err != nil || betAmount <= 0 {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", "Invalid bet amount.", 0xFF0000), nil, true)
+		return
+	}
+	if betAmount > remaining {
+		utils.SendInteractionResponse(s, i, utils.InsufficientChipsEmbed(betAmount, user.Chips, "that wager"), nil, true)
+		return
+	}
+	game.Bets[betType] = betAmount
+	utils.UpdateComponentInteraction(s, i, utils.RouletteGameEmbed("betting", game.Bets, 0, "", 0, 0, 0), game.buildComponents())
+}
 func (rg *RouletteGame) calculateProfit() int64 {
 	num := rg.ResultNumber
 	profit := int64(0)
