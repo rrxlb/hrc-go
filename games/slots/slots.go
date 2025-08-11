@@ -105,16 +105,21 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 	log.Printf("[slots] bet validated")
-	if utils.JackpotMgr != nil {
-		utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, adjusted)
-	}
-	log.Printf("[slots] jackpot contribution done")
 	initial := game.buildEmbed("", 0, 0, false, 0)
 	if err := utils.EditOriginalInteraction(s, i, initial, nil); err != nil {
 		log.Printf("[slots] initial edit failed: %v", err)
 		return
 	}
 	log.Printf("[slots] initial edit success")
+	// Contribute to jackpot asynchronously to avoid blocking main interaction flow
+	if utils.JackpotMgr != nil {
+		log.Printf("[slots] spawning jackpot contribution goroutine bet=%d", adjusted)
+		go func(b int64) {
+			defer func() { recover() }()
+			utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, b)
+			log.Printf("[slots] jackpot contribution async done bet=%d", b)
+		}(adjusted)
+	}
 	// Fetch message ID for animation
 	if orig, err := s.InteractionResponse(i.Interaction); err == nil {
 		game.MessageID = orig.ID
