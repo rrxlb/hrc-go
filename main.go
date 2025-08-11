@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	baccarat "hrc-go/games/baccarat"
 	blackjack "hrc-go/games/blackjack"
 	roulette "hrc-go/games/roulette"
 	threecardpoker "hrc-go/games/three_card_poker"
@@ -230,6 +231,7 @@ func registerSlashCommands(s *discordgo.Session) error {
 			Description: "Claim all available bonuses",
 		},
 		blackjack.RegisterBlackjackCommands(),
+		baccarat.RegisterBaccaratCommand(),
 		roulette.RegisterRouletteCommand(),
 		threecardpoker.RegisterThreeCardPokerCommand(),
 	}
@@ -269,6 +271,8 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			handleClaimAllCommand(s, i)
 		case "blackjack":
 			blackjack.HandleBlackjackCommand(s, i)
+		case "baccarat":
+			baccarat.HandleBaccaratCommand(s, i)
 		case "roulette":
 			roulette.HandleRouletteCommand(s, i)
 		case "tcpoker":
