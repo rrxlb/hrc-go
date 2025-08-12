@@ -486,6 +486,14 @@ func (bg *BlackjackGame) createGameEmbed(gameOver bool) *discordgo.MessageEmbed 
 
 // HandleBlackjackCommand handles the /blackjack slash command
 func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start)
+		if duration > 100*time.Millisecond {
+			log.Printf("Slow blackjack command: %dms", duration.Milliseconds())
+		}
+	}()
+	
 	// Parse bet amount
 	betOption := i.ApplicationCommandData().Options[0]
 	betStr := betOption.StringValue()

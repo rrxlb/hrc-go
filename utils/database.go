@@ -168,6 +168,11 @@ func SetupDatabase() error {
 		log.Printf("Warning: Failed to create user_achievements table: %v", err)
 	}
 
+	// Create performance indexes
+	if err := createPerformanceIndexes(); err != nil {
+		log.Printf("Warning: Failed to create performance indexes: %v", err)
+	}
+
 	return nil
 }
 
@@ -186,6 +191,14 @@ func CloseDatabase() {
 
 // GetUser retrieves a user from the database, creating one if it doesn't exist
 func GetUser(userID int64) (*User, error) {
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start)
+		if duration > 50*time.Millisecond {
+			log.Printf("Slow database GetUser: %dms", duration.Milliseconds())
+		}
+	}()
+	
 	if DB == nil {
 		return &User{
 			UserID:              userID,
@@ -238,7 +251,6 @@ func GetUser(userID int64) (*User, error) {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 
-	log.Printf("Retrieved user %d: chips=%d, xp=%d", user.UserID, user.Chips, user.TotalXP)
 	return &user, nil
 }
 
@@ -300,7 +312,6 @@ func CreateUser(userID int64) (*User, error) {
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
 
-	log.Printf("Created new user %d with %d chips", userID, StartingChips)
 	return user, nil
 }
 
@@ -452,8 +463,6 @@ func UpdateUser(userID int64, updates UserUpdateData) (*User, error) {
 		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
 
-	log.Printf("Updated user %d: chips=%d, xp=%d, wins=%d, losses=%d",
-		user.UserID, user.Chips, user.TotalXP, user.Wins, user.Losses)
 	return &user, nil
 }
 
@@ -666,5 +675,34 @@ func createUsersTable() error {
 		return fmt.Errorf("failed to create users table: %w", err)
 	}
 	log.Println("users table created/verified successfully")
+	return nil
+}
+
+// createPerformanceIndexes creates indexes to optimize query performance
+func createPerformanceIndexes() error {
+	if DB == nil {
+		return fmt.Errorf("database not connected")
+	}
+	
+	ctx := context.Background()
+	
+	// Indexes for leaderboard queries (chips, total_xp, prestige)
+	indexes := []string{
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_chips_desc ON users(chips DESC, user_id)",
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_total_xp_desc ON users(total_xp DESC, user_id)",
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_prestige_desc ON users(prestige DESC, user_id)",
+		// Additional indexes for common queries
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_wins ON users(wins)",
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_created_at ON users(created_at)",
+	}
+	
+	for _, query := range indexes {
+		if _, err := DB.Exec(ctx, query); err != nil {
+			// Log but don't fail - indexes might already exist
+			log.Printf("Index creation info: %v", err)
+		}
+	}
+	
+	log.Println("Performance indexes created/verified successfully")
 	return nil
 }

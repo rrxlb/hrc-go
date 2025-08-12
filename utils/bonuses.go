@@ -395,7 +395,7 @@ func (bm *BonusManager) CreateCooldownEmbed(user *User) *discordgo.MessageEmbed 
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "🕒 Bonus Cooldowns",
-		Description: fmt.Sprintf("Bonus status for %s", user.UserID),
+		Description: fmt.Sprintf("Bonus status for <@%d>", user.UserID),
 		Color:       BotColor,
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: "Bonus System",

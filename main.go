@@ -28,6 +28,7 @@ import (
 	"hrc-go/utils"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/jackc/pgx/v5"
 )
 
 var session *discordgo.Session
@@ -56,8 +57,8 @@ func main() {
 		defer utils.CloseDatabase()
 	}
 
-	// Initialize cache system (10 minute TTL)
-	utils.InitializeCache(10 * time.Minute)
+	// Initialize cache system (5 minute TTL for better responsiveness)
+	utils.InitializeCache(5 * time.Minute)
 	defer utils.CloseCache()
 	log.Println("Cache system initialized")
 
@@ -98,7 +99,7 @@ func main() {
 	} else {
 		log.Printf("Failed to base64 decode first token segment: %v (segment=%s)", err, parts[0])
 	}
-	log.Printf("Token length=%d characters (sanitized).", len(token))
+	// Token validated and sanitized
 
 	// Create Discord session
 	var err error
@@ -175,25 +176,31 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 		log.Printf("Failed to update status: %v", err)
 	}
 
+	// Register commands first for fastest response
+	start := time.Now()
+	if err := registerSlashCommands(s); err != nil {
+		log.Printf("Failed to register slash commands: %v", err)
+	} else {
+		log.Printf("Slash commands ready in %dms", time.Since(start).Milliseconds())
+	}
+	
+	// Initialize heavy systems in background
 	go func() {
-		start := time.Now()
-		if err := registerSlashCommands(s); err != nil {
-			log.Printf("Failed to register slash commands: %v", err)
-		} else {
-			log.Printf("Slash commands ready in %dms", time.Since(start).Milliseconds())
-		}
 		// Start background cleanup loops (mines)
 		mines.StartCleanupLoop(s)
-		// Lazy init heavy systems
+		
+		// Initialize achievement system
 		if err := utils.InitializeAchievementManager(); err != nil {
-			log.Printf("Achievement manager init failed (lazy): %v", err)
+			log.Printf("Achievement manager init failed: %v", err)
 		} else {
-			log.Println("Achievement system initialized (lazy)")
+			log.Println("Achievement system initialized")
 		}
+		
+		// Initialize jackpot system  
 		if err := utils.InitializeJackpotManager(); err != nil {
-			log.Printf("Jackpot manager init failed (lazy): %v", err)
+			log.Printf("Jackpot manager init failed: %v", err)
 		} else {
-			log.Println("Jackpot system initialized (lazy)")
+			log.Println("Jackpot system initialized")
 		}
 	}()
 }
@@ -537,14 +544,25 @@ func handleLeaderboardCommand(s *discordgo.Session, i *discordgo.InteractionCrea
 	if len(opts) > 0 {
 		sub = opts[0].Name
 	}
-	// Minimal: DB query top 10 by field
+	// Optimized leaderboard query with prepared statements
 	title := map[string]string{"chips": "High Rollers", "xp": "Total XP", "prestige": "Prestige"}[sub]
-	field := map[string]string{"chips": "chips", "xp": "total_xp", "prestige": "prestige"}[sub]
 	if utils.DB == nil {
 		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed(title, "Database not connected.", 0xE74C3C), nil, false)
 		return
 	}
-	rows, err := utils.DB.Query(context.Background(), fmt.Sprintf("SELECT user_id, %s FROM users ORDER BY %s DESC LIMIT 10", field, field))
+	
+	var rows pgx.Rows
+	var err error
+	switch sub {
+	case "chips":
+		rows, err = utils.DB.Query(context.Background(), "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10")
+	case "xp":
+		rows, err = utils.DB.Query(context.Background(), "SELECT user_id, total_xp FROM users ORDER BY total_xp DESC, user_id LIMIT 10")
+	case "prestige":
+		rows, err = utils.DB.Query(context.Background(), "SELECT user_id, prestige FROM users ORDER BY prestige DESC, user_id LIMIT 10")
+	default:
+		rows, err = utils.DB.Query(context.Background(), "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10")
+	}
 	if err != nil {
 		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed(title, "Failed to load leaderboard.", 0xE74C3C), nil, false)
 		return

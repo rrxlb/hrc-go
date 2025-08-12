@@ -33,8 +33,8 @@ func InitializeCache(ttl time.Duration) {
 		done:      make(chan bool),
 	}
 	
-	// Start cleanup routine every 5 minutes
-	Cache.cleanupTicker = time.NewTicker(5 * time.Minute)
+	// Start cleanup routine every 2 minutes for better performance
+	Cache.cleanupTicker = time.NewTicker(2 * time.Minute)
 	go Cache.cleanupRoutine()
 }
 
@@ -163,9 +163,7 @@ func (uc *UserCache) cleanup() {
 		}
 		uc.mutex.Unlock()
 		
-		if len(expiredKeys) > 0 {
-			log.Printf("Cleaned up %d expired cache entries. Cache size: %d", len(expiredKeys), uc.Size())
-		}
+		// Cleanup completed silently for performance
 	}
 }
 
@@ -205,13 +203,16 @@ func UpdateCachedUser(userID int64, updates UserUpdateData) (*User, error) {
 		Cache.Update(userID, user)
 	}
 	
-	// Check for new achievements if achievement manager is initialized
+	// Check for new achievements asynchronously for performance
 	if AchievementMgr != nil {
-		if newAchievements, err := AchievementMgr.CheckUserAchievements(user); err != nil {
-			log.Printf("Failed to check achievements for user %d: %v", userID, err)
-		} else if len(newAchievements) > 0 {
-			log.Printf("User %d earned %d new achievements", userID, len(newAchievements))
-		}
+		go func(u *User, uid int64) {
+			if newAchievements, err := AchievementMgr.CheckUserAchievements(u); err != nil {
+				// Only log errors to avoid performance impact
+				log.Printf("Failed to check achievements for user %d: %v", uid, err)
+			} else if len(newAchievements) > 0 {
+				log.Printf("User %d earned %d new achievements", uid, len(newAchievements))
+			}
+		}(user, userID)
 	}
 	
 	return user, nil
