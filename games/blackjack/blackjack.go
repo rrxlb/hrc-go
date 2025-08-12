@@ -31,6 +31,7 @@ type BlackjackGame struct {
 	NetProfit           int64
 	View                *utils.BlackjackView
 	OriginalInteraction *discordgo.InteractionCreate
+	IsRevealing         bool
 }
 
 // GameResult represents the result of a blackjack hand
@@ -228,8 +229,11 @@ func (bg *BlackjackGame) standCurrentHand() error {
 
 // finishGame completes the game and calculates results
 func (bg *BlackjackGame) finishGame() error {
-	// Play dealer hand
-	bg.playDealerHand()
+	// Play dealer hand with animation
+	if err := bg.playDealerHand(); err != nil {
+		log.Printf("Error during dealer hand animation: %v", err)
+		// Continue with game completion even if animation fails
+	}
 
 	// Calculate results for each hand
 	totalProfit := int64(0)
@@ -290,8 +294,15 @@ func (bg *BlackjackGame) finishGame() error {
 	return nil
 }
 
-// playDealerHand plays the dealer's hand according to standard rules
-func (bg *BlackjackGame) playDealerHand() {
+// playDealerHand plays the dealer's hand according to standard rules with animation
+func (bg *BlackjackGame) playDealerHand() error {
+	// Set revealing state to disable player actions
+	bg.IsRevealing = true
+	defer func() {
+		// Ensure revealing state is always cleared, even if there's a panic
+		bg.IsRevealing = false
+	}()
+
 	// Check if any player hands are not busted
 	anyPlayerNotBusted := false
 	for _, hand := range bg.PlayerHands {
@@ -303,13 +314,41 @@ func (bg *BlackjackGame) playDealerHand() {
 
 	// If all players are busted, dealer doesn't play
 	if !anyPlayerNotBusted {
-		return
+		return nil
+	}
+
+	// Initial delay before revealing dealer cards (matching Python's 0.5s)
+	time.Sleep(500 * time.Millisecond)
+
+	// Update display to show dealer's full hand initially
+	if err := bg.updateGameStateRevealing(); err != nil {
+		log.Printf("Warning: failed to update game state during initial reveal: %v", err)
+		// Don't return error for display issues, continue with game logic
 	}
 
 	// Dealer plays: hit on soft 17 and below, stand on hard 17 and above
-	for bg.DealerHand.GetValue() < utils.DealerStandValue {
+	cardCount := 0
+	maxCards := 10 // Safety limit to prevent infinite loops
+	for bg.DealerHand.GetValue() < utils.DealerStandValue && cardCount < maxCards {
+		// Deal next card
 		bg.DealerHand.AddCard(bg.Deck.Deal())
+		cardCount++
+
+		// Delay between cards (matching Python's 0.3s)
+		time.Sleep(300 * time.Millisecond)
+
+		// Update display after each card
+		if err := bg.updateGameStateRevealing(); err != nil {
+			log.Printf("Warning: failed to update game state during card reveal: %v", err)
+			// Continue with animation even if display update fails
+		}
 	}
+
+	if cardCount >= maxCards {
+		log.Printf("Warning: dealer hit maximum card limit in blackjack game %s", bg.GameID)
+	}
+
+	return nil
 }
 
 // calculateHandResult calculates the result for a specific hand
@@ -351,7 +390,7 @@ func (bg *BlackjackGame) calculateHandResult(hand *utils.Hand, handIndex int) Ga
 
 // updateViewOptions updates the available actions based on game state
 func (bg *BlackjackGame) updateViewOptions() {
-	if bg.IsGameOver() || bg.CurrentHand >= len(bg.PlayerHands) {
+	if bg.IsGameOver() || bg.CurrentHand >= len(bg.PlayerHands) || bg.IsRevealing {
 		bg.View.CanHit = false
 		bg.View.CanStand = false
 		bg.View.CanDouble = false
@@ -390,6 +429,17 @@ func (bg *BlackjackGame) updateViewOptions() {
 func (bg *BlackjackGame) updateGameState() error {
 	embed := bg.createGameEmbed(false)
 	components := bg.View.GetComponents()
+
+	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
+		return utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+	}
+	return utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+}
+
+// updateGameStateRevealing updates the game state during dealer card reveals
+func (bg *BlackjackGame) updateGameStateRevealing() error {
+	embed := bg.createGameEmbed(true)         // Show as game over to reveal dealer cards
+	components := bg.View.DisableAllButtons() // Disable all buttons during reveal
 
 	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
 		return utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
@@ -493,7 +543,7 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 			log.Printf("Slow blackjack command: %dms", duration.Milliseconds())
 		}
 	}()
-	
+
 	// Parse bet amount
 	betOption := i.ApplicationCommandData().Options[0]
 	betStr := betOption.StringValue()
