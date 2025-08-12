@@ -80,7 +80,8 @@ func (bg *BlackjackGame) StartGame() error {
 	bg.updateViewOptions()
 
 	if playerValue == 21 {
-		// Player has blackjack, finish the game immediately
+		// Player has blackjack, finish the game immediately without sending initial response
+		// finishGame() will handle the response
 		return bg.finishGame()
 	}
 
@@ -273,14 +274,15 @@ func (bg *BlackjackGame) finishGame() error {
 	embed := bg.createGameEmbed(true)
 	components := bg.View.DisableAllButtons()
 
-	// Decide update method based on interaction type (use original slash for edits)
+	// Decide response method based on interaction type and whether initial response was sent
 	var errUpdate error
 	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
 		// Component interaction: send update message
 		errUpdate = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
 	} else {
-		// Slash command interaction: edit original response (use stored original interaction)
-		errUpdate = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+		// Slash command interaction: if this is natural blackjack, send initial response instead of update
+		// For natural blackjack, no initial response was sent, so we send the first response
+		errUpdate = utils.SendInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components, false)
 	}
 	if errUpdate != nil {
 		return errUpdate
