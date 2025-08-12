@@ -108,3 +108,16 @@ const (
 const (
 	ChipsEmoji = "<:chips:1404332422451040330>"
 )
+
+// Prestige and Premium badge emojis (used in profile "badges" row)
+// If a prestige level doesn't exist in this map, the code will fall back to a roman numeral.
+var PrestigeEmojis = map[int]string{
+	1: "<:p1:1404690937925337150>",
+	2: "<:p2:1404690951980584990>",
+	3: "<:p3:1404690959538851936>",
+	4: "<:p4:1404690967067623565>",
+	5: "<:p5:1404690974059528233>",
+}
+
+// Optional premium animated emoji (may be used in future badge rows alongside prestige)
+const PremiumEmoji = "<a:goat:1404690990505267384>"

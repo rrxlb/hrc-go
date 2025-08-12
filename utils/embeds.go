@@ -285,7 +285,7 @@ func GameResultEmbed(gameType string, bet, profit int64, userBefore, userAfter *
 
 // UserProfileEmbed creates an embed for user profile display
 // showWinLoss controls whether wins/losses/win rate stats are shown (premium feature)
-func UserProfileEmbed(user *User, discordUser *discordgo.User, showWinLoss bool) *discordgo.MessageEmbed {
+func UserProfileEmbed(user *User, discordUser *discordgo.User, showWinLoss bool, hasPremium bool) *discordgo.MessageEmbed {
 	rank := getUserRank(user.TotalXP)
 	nextRank := getNextRank(user.TotalXP)
 
@@ -293,6 +293,44 @@ func UserProfileEmbed(user *User, discordUser *discordgo.User, showWinLoss bool)
 	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
 		URL: discordUser.AvatarURL(""),
 	}
+
+	// Badges row (prestige and optional premium). Shown above everything else.
+	// Primary: prestige badge emoji; Fallback: roman numerals I, II, III, IV, V, ... if emoji missing.
+	badges := ""
+	if hasPremium {
+		badges = PremiumEmoji
+	}
+	if user.Prestige > 0 {
+		if em, ok := PrestigeEmojis[user.Prestige]; ok {
+			if badges != "" {
+				badges += " " + em
+			} else {
+				badges = em
+			}
+		} else {
+			// Fallback to roman numerals up to a reasonable range
+			roman := []string{"", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"}
+			n := user.Prestige
+			if n >= 0 && n < len(roman) {
+				if badges != "" {
+					badges += " " + roman[n]
+				} else {
+					badges = roman[n]
+				}
+			} else {
+				if badges != "" {
+					badges += " " + strconv.Itoa(user.Prestige)
+				} else {
+					badges = strconv.Itoa(user.Prestige)
+				}
+			}
+		}
+	}
+	// Reserve vertical space even if no badges by using a zero-width space when empty
+	if badges == "" {
+		badges = "\u200b"
+	}
+	embed.Description = badges
 
 	// User info
 	embed.Fields = []*discordgo.MessageEmbedField{

@@ -541,8 +541,9 @@ func handleProfileCommand(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: "❌ Error accessing user data.", Flags: discordgo.MessageFlagsEphemeral}})
 		return
 	}
-	// Premium: hide wins/losses unless target has premium enabled
+	// Premium: hide wins/losses unless target has premium enabled, and show premium badge
 	showWinLoss := false
+	hasPremiumBadge := false
 	// Try to fetch member from main guild for role checks when viewing others
 	var memberForPremium *discordgo.Member = i.Member
 	if targetDiscordUser.ID != i.Member.User.ID {
@@ -551,9 +552,10 @@ func handleProfileCommand(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		}
 	}
 	if memberForPremium != nil && utils.HasPremiumRole(memberForPremium) {
+		hasPremiumBadge = true
 		showWinLoss = utils.GetPremiumSetting(user, utils.PremiumFeatureWinsLosses)
 	}
-	embed := utils.UserProfileEmbed(user, targetDiscordUser, showWinLoss)
+	embed := utils.UserProfileEmbed(user, targetDiscordUser, showWinLoss, hasPremiumBadge)
 	// Components: View Achievements button and conditional Join link
 	components := []discordgo.MessageComponent{}
 	// Row with View Achievements
