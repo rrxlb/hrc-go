@@ -34,6 +34,7 @@ type BlackjackGame struct {
 	IsRevealing         bool
 	InitialResponseSent bool
 	InteractionAcknowledged bool
+	ComponentResponseSent bool
 }
 
 // GameResult represents the result of a blackjack hand
@@ -282,18 +283,34 @@ func (bg *BlackjackGame) finishGame() error {
 
 	// Decide response method based on interaction type and whether initial response was sent
 	var errUpdate error
-	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-		// Component interaction: send update message
-		errUpdate = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
-	} else if bg.InitialResponseSent {
-		// Slash command interaction with initial response already sent: update the response
-		errUpdate = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
-	} else {
-		// Slash command interaction with no initial response (natural blackjack): send initial response
-		errUpdate = utils.SendInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components, false)
-	}
-	if errUpdate != nil {
-		return errUpdate
+	
+	// Skip update if interaction has already been acknowledged/failed
+	if !bg.InteractionAcknowledged {
+		if bg.Interaction.Type == discordgo.InteractionMessageComponent {
+			if !bg.ComponentResponseSent {
+				// First response to component interaction
+				errUpdate = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+				if errUpdate == nil {
+					bg.ComponentResponseSent = true
+				}
+			} else {
+				// Subsequent updates to component interaction
+				errUpdate = utils.EditOriginalInteraction(bg.Session, bg.Interaction, embed, components)
+			}
+		} else if bg.InitialResponseSent {
+			// Slash command interaction with initial response already sent: update the response
+			errUpdate = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+		} else {
+			// Slash command interaction with no initial response (natural blackjack): send initial response
+			errUpdate = utils.SendInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components, false)
+		}
+		
+		// If update fails, mark interaction as acknowledged
+		if errUpdate != nil {
+			bg.InteractionAcknowledged = true
+			// Don't return error, continue with game cleanup
+			errUpdate = nil
+		}
 	}
 
 	// Clean up the game
@@ -450,7 +467,16 @@ func (bg *BlackjackGame) updateGameState() error {
 
 	var err error
 	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+		if !bg.ComponentResponseSent {
+			// First response to component interaction
+			err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+			if err == nil {
+				bg.ComponentResponseSent = true
+			}
+		} else {
+			// Subsequent updates to component interaction
+			err = utils.EditOriginalInteraction(bg.Session, bg.Interaction, embed, components)
+		}
 	} else {
 		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
 	}
@@ -475,7 +501,16 @@ func (bg *BlackjackGame) updateGameStateRevealing() error {
 
 	var err error
 	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+		if !bg.ComponentResponseSent {
+			// First response to component interaction
+			err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+			if err == nil {
+				bg.ComponentResponseSent = true
+			}
+		} else {
+			// Subsequent updates to component interaction
+			err = utils.EditOriginalInteraction(bg.Session, bg.Interaction, embed, components)
+		}
 	} else {
 		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
 	}
