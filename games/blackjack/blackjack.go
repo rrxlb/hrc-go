@@ -487,15 +487,10 @@ func (bg *BlackjackGame) updateGameState() error {
 
 	var err error
 	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-		if !bg.ComponentResponseSent {
-			// First response to component interaction
-			err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
-			if err == nil {
-				bg.ComponentResponseSent = true
-			}
-		} else {
-			// Subsequent updates to component interaction
-			err = utils.EditOriginalInteraction(bg.Session, bg.Interaction, embed, components)
+		// Always respond to component interactions to avoid "This interaction failed"
+		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+		if err == nil {
+			bg.ComponentResponseSent = true
 		}
 	} else {
 		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
@@ -529,15 +524,10 @@ func (bg *BlackjackGame) updateGameStateRevealing() error {
 
 	var err error
 	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-		if !bg.ComponentResponseSent {
-			// First response to component interaction
-			err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
-			if err == nil {
-				bg.ComponentResponseSent = true
-			}
-		} else {
-			// Subsequent updates to component interaction
-			err = utils.EditOriginalInteraction(bg.Session, bg.Interaction, embed, components)
+		// Always acknowledge component interaction with an update
+		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+		if err == nil {
+			bg.ComponentResponseSent = true
 		}
 	} else {
 		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
@@ -643,9 +633,6 @@ func (bg *BlackjackGame) createGameEmbed(gameOver bool) *discordgo.MessageEmbed 
 
 	return embed
 }
-
-// Helper functions
-// (Removed unused helper functions getProfitPrefix/abs; using utils equivalents in embeds)
 
 // HandleBlackjackCommand handles the /blackjack slash command
 func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
