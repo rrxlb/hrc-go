@@ -183,23 +183,23 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 	} else {
 		log.Printf("Slash commands ready in %dms", time.Since(start).Milliseconds())
 	}
-	
+
 	// Initialize heavy systems in background
 	go func() {
 		// Start background cleanup loops (mines)
 		mines.StartCleanupLoop(s)
-		
+
 		// Initialize Top.gg client for voting
 		utils.InitializeTopGGClient("1396564026233983108")
-		
+
 		// Initialize achievement system
 		if err := utils.InitializeAchievementManager(); err != nil {
 			log.Printf("Achievement manager init failed: %v", err)
 		} else {
 			log.Println("Achievement system initialized")
 		}
-		
-		// Initialize jackpot system  
+
+		// Initialize jackpot system
 		if err := utils.InitializeJackpotManager(); err != nil {
 			log.Printf("Jackpot manager init failed: %v", err)
 		} else {
@@ -226,6 +226,14 @@ func registerSlashCommands(s *discordgo.Session) error {
 		{
 			Name:        "profile",
 			Description: "View your casino profile and stats",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "user",
+					Description: "User to view (defaults to yourself)",
+					Required:    false,
+				},
+			},
 		},
 		{
 			Name:        "chips",
@@ -488,6 +496,10 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if strings.HasPrefix(customID, "vote_") {
 		handleVoteButton(s, i)
 	}
+
+	if strings.HasPrefix(customID, "profile_achievements_") {
+		handleProfileAchievementsButton(s, i)
+	}
 }
 
 func handlePingCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -514,19 +526,68 @@ func handleInfoCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 func handleProfileCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
+	// Determine whose profile to show
+	targetUserID := i.Member.User.ID
+	targetDiscordUser := i.Member.User
+	if len(i.ApplicationCommandData().Options) > 0 {
+		if u := i.ApplicationCommandData().Options[0].UserValue(nil); u != nil {
+			targetUserID = u.ID
+			targetDiscordUser = u
+		}
+	}
+	userID, _ := strconv.ParseInt(targetUserID, 10, 64)
 	user, err := utils.GetUser(userID)
 	if err != nil {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: "❌ Error accessing user data.", Flags: discordgo.MessageFlagsEphemeral}})
 		return
 	}
-	// Premium: hide wins/losses unless enabled
+	// Premium: hide wins/losses unless target has premium enabled
 	showWinLoss := false
-	if utils.HasPremiumRole(i.Member) {
+	// Try to fetch member from main guild for role checks when viewing others
+	var memberForPremium *discordgo.Member = i.Member
+	if targetDiscordUser.ID != i.Member.User.ID {
+		if m, err := s.GuildMember(i.GuildID, targetDiscordUser.ID); err == nil {
+			memberForPremium = m
+		}
+	}
+	if memberForPremium != nil && utils.HasPremiumRole(memberForPremium) {
 		showWinLoss = utils.GetPremiumSetting(user, utils.PremiumFeatureWinsLosses)
 	}
-	embed := utils.UserProfileEmbed(user, i.Member.User, showWinLoss)
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}}})
+	embed := utils.UserProfileEmbed(user, targetDiscordUser, showWinLoss)
+	// Components: View Achievements button and conditional Join link
+	components := []discordgo.MessageComponent{}
+	// Row with View Achievements
+	achBtn := discordgo.Button{CustomID: "profile_achievements_" + targetUserID, Label: "View Achievements", Style: discordgo.PrimaryButton}
+	row := discordgo.ActionsRow{Components: []discordgo.MessageComponent{achBtn}}
+	// Conditionally add Join for /bonus link if user not in main guild
+	showJoin := true
+	// Try to check membership in main guild
+	mainGuildID := strconv.FormatInt(utils.GuildID, 10)
+	if m, err := s.GuildMember(mainGuildID, i.Member.User.ID); err == nil && m != nil {
+		showJoin = false
+	}
+	if showJoin {
+		joinBtn := discordgo.Button{Label: "Join for /bonus", Style: discordgo.LinkButton, URL: utils.HighRollersClubLink}
+		row.Components = append(row.Components, joinBtn)
+	}
+	components = append(components, row)
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}, Components: components}})
+
+	// After a timeout, grey out the View Achievements button
+	go func(inter *discordgo.InteractionCreate) {
+		// 2 minutes to keep things tidy
+		time.Sleep(2 * time.Minute)
+		// Rebuild row but disabled/secondary
+		disabledBtn := discordgo.Button{CustomID: "profile_achievements_" + targetUserID, Label: "View Achievements", Style: discordgo.SecondaryButton, Disabled: true}
+		newRow := discordgo.ActionsRow{Components: []discordgo.MessageComponent{disabledBtn}}
+		if showJoin {
+			joinBtn := discordgo.Button{Label: "Join for /bonus", Style: discordgo.LinkButton, URL: utils.HighRollersClubLink}
+			newRow.Components = append(newRow.Components, joinBtn)
+		}
+		edit := &discordgo.WebhookEdit{Components: &[]discordgo.MessageComponent{newRow}}
+		_, _ = s.InteractionResponseEdit(inter.Interaction, edit)
+	}(i)
 }
 
 func handleBalanceCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -563,7 +624,7 @@ func handleLeaderboardCommand(s *discordgo.Session, i *discordgo.InteractionCrea
 		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed(title, "Database not connected.", 0xE74C3C), nil, false)
 		return
 	}
-	
+
 	var rows pgx.Rows
 	var err error
 	switch sub {
@@ -739,7 +800,7 @@ func buildPremiumEmbedAndComponents(member *discordgo.Member, user *utils.User) 
 	} else {
 		color = 0xE74C3C
 	}
-	embed := utils.CreateBrandedEmbed("💎 Premium Features", "", color)
+		embed := utils.CreateBrandedEmbed("💎 Premium Features", "", color)
 	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753753476/PR2_oxsxaa.png"}
 	var components []discordgo.MessageComponent
 	if hasRole {
@@ -755,7 +816,7 @@ func buildPremiumEmbedAndComponents(member *discordgo.Member, user *utils.User) 
 		}
 		embed.Fields = []*discordgo.MessageEmbedField{
 			{Name: "XP Display", Value: status(xp) + "\nShow XP gained in game results", Inline: false},
-			{Name: "Wins & Losses", Value: status(wl) + "\nShow wins and losses in your profile", Inline: false},
+			{Name: "Profile Stats", Value: status(wl) + "\nShow wins, losses, win% and total profit in your profile", Inline: false},
 		}
 		// Buttons reflect state
 		btnStyle := func(b bool) discordgo.ButtonStyle {
@@ -768,13 +829,13 @@ func buildPremiumEmbedAndComponents(member *discordgo.Member, user *utils.User) 
 		components = []discordgo.MessageComponent{
 			discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 				discordgo.Button{CustomID: "premium_" + utils.PremiumFeatureXPDisplay, Label: "XP Display", Style: btnStyle(xp)},
-				discordgo.Button{CustomID: "premium_" + utils.PremiumFeatureWinsLosses, Label: "Wins & Losses", Style: btnStyle(wl)},
+				discordgo.Button{CustomID: "premium_" + utils.PremiumFeatureWinsLosses, Label: "Profile Stats", Style: btnStyle(wl)},
 			}},
 		}
 	} else {
 		embed.Description = "You need to be a Patreon member to access premium features.\n\nVisit our Patreon page to subscribe and unlock these features!"
 		embed.Fields = []*discordgo.MessageEmbedField{
-			{Name: "Available Features", Value: "• XP Display in game results\n• Wins & Losses in profile\n• Future exclusive features", Inline: false},
+			{Name: "Available Features", Value: "• XP Display in game results\n• Wins/Losses, Win% and Total Profit in profile\n• Future exclusive features", Inline: false},
 		}
 	}
 	return embed, components
@@ -811,6 +872,59 @@ func handlePremiumButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}, Components: components},
+	})
+}
+
+// profile achievements button handler
+func handleProfileAchievementsButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	cid := i.MessageComponentData().CustomID
+	// Expected format: profile_achievements_<userID>
+	parts := strings.Split(cid, "_")
+	if len(parts) < 3 {
+		return
+	}
+	targetID := parts[2]
+	tid, _ := strconv.ParseInt(targetID, 10, 64)
+
+	// Load recent achievements
+	var desc string
+	if utils.AchievementMgr == nil {
+		desc = "Achievements system is initializing. Please try again later."
+	} else {
+		if achievements, err := utils.AchievementMgr.GetUserAchievements(tid); err == nil {
+			if len(achievements) == 0 {
+				desc = "No achievements earned yet."
+			} else {
+				// Show up to last 10
+				max := 10
+				if len(achievements) < max {
+					max = len(achievements)
+				}
+				lines := make([]string, 0, max)
+				for idx := 0; idx < max; idx++ {
+					ua := achievements[idx]
+					a := utils.AchievementMgr.GetAchievement(ua.AchievementID)
+					if a != nil {
+						lines = append(lines, fmt.Sprintf("%s **%s** — <t:%d:R>", a.Icon, a.Name, ua.EarnedAt.Unix()))
+					}
+				}
+				desc = strings.Join(lines, "\n")
+			}
+		} else {
+			desc = "Failed to load achievements."
+		}
+	}
+	// Try to fetch the target user for title/avatar context
+	titleName := i.Member.User.Username
+	if u, err := s.User(targetID); err == nil && u != nil {
+		titleName = u.Username
+	}
+	title := fmt.Sprintf("%s's Achievements", titleName)
+	embed := utils.CreateBrandedEmbed(title, desc, utils.BotColor)
+	// Ephemeral reply
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}, Flags: discordgo.MessageFlagsEphemeral},
 	})
 }
 
@@ -1026,8 +1140,8 @@ func handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	// Check if Top.gg client is available
 	if utils.GlobalTopGGClient == nil {
-		embed := utils.CreateBrandedEmbed("❌ Vote Unavailable", 
-			"This feature is currently disabled. The bot owner needs to configure the Top.gg API token.", 
+		embed := utils.CreateBrandedEmbed("❌ Vote Unavailable",
+			"This feature is currently disabled. The bot owner needs to configure the Top.gg API token.",
 			0xE74C3C)
 		utils.SendInteractionResponse(s, i, embed, nil, true)
 		return
@@ -1046,7 +1160,7 @@ func handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		// Show cooldown remaining
 		hours := int(result.TimeRemaining.Hours())
 		minutes := int(result.TimeRemaining.Minutes()) % 60
-		
+
 		embed := utils.CreateBrandedEmbed("🗳️ Vote Cooldown",
 			fmt.Sprintf("You have already claimed your vote bonus. You can claim again in %dh %dm.", hours, minutes),
 			0xE74C3C)
@@ -1109,7 +1223,7 @@ func handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		// Show vote button
 		embed := utils.CreateBrandedEmbed("🗳️ Vote on Top.gg",
 			"You have not voted for the bot in the last 12 hours. "+
-			"Click the button below to vote, then run this command again to claim your reward!",
+				"Click the button below to vote, then run this command again to claim your reward!",
 			utils.BotColor)
 		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
 			URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1754610906/TU_khaw12.png",
@@ -1128,7 +1242,7 @@ func handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				},
 			},
 		}
-		
+
 		utils.SendInteractionResponse(s, i, embed, components, true)
 	}
 }

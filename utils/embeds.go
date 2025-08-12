@@ -302,7 +302,7 @@ func UserProfileEmbed(user *User, discordUser *discordgo.User, showWinLoss bool)
 			Inline: true,
 		},
 		{
-			Name:   "Balance",
+			Name:   "Chips",
 			Value:  fmt.Sprintf("%s %s", FormatChips(user.Chips), ChipsEmoji),
 			Inline: true,
 		},
@@ -313,7 +313,7 @@ func UserProfileEmbed(user *User, discordUser *discordgo.User, showWinLoss bool)
 		},
 	}
 
-	// Stats
+	// Stats (premium-gated)
 	if showWinLoss {
 		totalGames := user.Wins + user.Losses
 		winRate := 0.0
@@ -340,27 +340,26 @@ func UserProfileEmbed(user *User, discordUser *discordgo.User, showWinLoss bool)
 		}...)
 	}
 
-	embed.Fields = append(embed.Fields, []*discordgo.MessageEmbedField{
-		{
-			Name:   "Total XP",
-			Value:  FormatNumber(user.TotalXP),
-			Inline: true,
-		},
-		{
+	// Always show XP; profit is premium-gated per request
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+		Name:   "Total XP",
+		Value:  FormatNumber(user.TotalXP),
+		Inline: true,
+	})
+	if showWinLoss {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   "Net Profit",
 			Value:  fmt.Sprintf("%s%s %s", getProfitPrefix(user.Chips-StartingChips), FormatChips(abs(user.Chips-StartingChips)), ChipsEmoji),
 			Inline: true,
-		},
-	}...)
+		})
+	}
 
 	// Next rank progress
 	if nextRank != nil {
-		xpNeeded := int64(nextRank.XPRequired) - user.TotalXP
 		progressBar := createProgressBar(user.TotalXP, int64(rank.XPRequired), int64(nextRank.XPRequired), 10)
-
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   fmt.Sprintf("Progress to %s %s", nextRank.Icon, nextRank.Name),
-			Value:  fmt.Sprintf("%s\n**%s** / **%s** XP (**%s** needed)", progressBar, FormatNumber(user.TotalXP), FormatNumber(int64(nextRank.XPRequired)), FormatNumber(xpNeeded)),
+			Name:   "XP to Next Rank",
+			Value:  fmt.Sprintf("%s\n%s / %s", progressBar, FormatNumber(user.TotalXP), FormatNumber(int64(nextRank.XPRequired))),
 			Inline: false,
 		})
 	}
@@ -372,6 +371,31 @@ func UserProfileEmbed(user *User, discordUser *discordgo.User, showWinLoss bool)
 		Value:  formatDuration(accountAge),
 		Inline: true,
 	})
+
+	// Recent achievements (up to 3), if achievement system is available
+	if AchievementMgr != nil {
+		if achs, err := AchievementMgr.GetUserAchievements(user.UserID); err == nil && len(achs) > 0 {
+			max := 3
+			if len(achs) < max {
+				max = len(achs)
+			}
+			lines := []string{}
+			for idx := 0; idx < max; idx++ {
+				ua := achs[idx]
+				if a := AchievementMgr.GetAchievement(ua.AchievementID); a != nil {
+					ts := ua.EarnedAt.Unix()
+					lines = append(lines, fmt.Sprintf("%s %s (<t:%d:R>)", a.Icon, a.Name, ts))
+				}
+			}
+			if len(lines) > 0 {
+				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+					Name:   "🏆 Recent Achievements",
+					Value:  strings.Join(lines, "\n"),
+					Inline: false,
+				})
+			}
+		}
+	}
 
 	return embed
 }
@@ -443,7 +467,7 @@ func getNextRank(totalXP int64) *Rank {
 
 func createProgressBar(current, min, max int64, length int) string {
 	if max <= min {
-		return strings.Repeat("█", length)
+		return strings.Repeat("🟩", length)
 	}
 
 	progress := float64(current-min) / float64(max-min)
@@ -457,7 +481,8 @@ func createProgressBar(current, min, max int64, length int) string {
 	filled := int(progress * float64(length))
 	empty := length - filled
 
-	return strings.Repeat("█", filled) + strings.Repeat("░", empty)
+	// Use green squares and white squares per request
+	return strings.Repeat("🟩", filled) + strings.Repeat("⬜", empty)
 }
 
 func formatDuration(d time.Duration) string {
@@ -469,6 +494,9 @@ func formatDuration(d time.Duration) string {
 	}
 	return fmt.Sprintf("%d hours", hours)
 }
+
+// relativeTimeAgo returns a simple human-friendly elapsed time like "2 days ago"
+// (relativeTimeAgo removed; using Discord timestamps for relative times)
 
 // RouletteGameEmbed builds the roulette game embed for different states
 // state: betting | spinning | final
@@ -619,7 +647,7 @@ func CreateAchievementNotificationEmbed(achievements []*Achievement) *discordgo.
 	// Set title and description based on number of achievements
 	if len(achievements) == 1 {
 		achievement := achievements[0]
-		title = fmt.Sprintf("🎉 Achievement Unlocked!")
+		title = "🎉 Achievement Unlocked!"
 		description = fmt.Sprintf("%s **%s**\n*%s*", achievement.Icon, achievement.Name, achievement.Description)
 	} else {
 		title = fmt.Sprintf("🎉 %d Achievements Unlocked!", len(achievements))
@@ -640,11 +668,11 @@ func CreateAchievementNotificationEmbed(achievements []*Achievement) *discordgo.
 	// Add rewards section if any rewards exist
 	if totalChipsReward > 0 || totalXPReward > 0 {
 		var rewardLines []string
-		
+
 		if totalChipsReward > 0 {
 			rewardLines = append(rewardLines, fmt.Sprintf("%s %s", FormatChips(totalChipsReward), ChipsEmoji))
 		}
-		
+
 		if totalXPReward > 0 {
 			rewardLines = append(rewardLines, fmt.Sprintf("%s XP", FormatChips(totalXPReward)))
 		}
@@ -662,7 +690,7 @@ func CreateAchievementNotificationEmbed(achievements []*Achievement) *discordgo.
 		for _, achievement := range achievements {
 			achievementDetails = append(achievementDetails, fmt.Sprintf("**%s** - *%s*", achievement.Name, achievement.Description))
 		}
-		
+
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   "📜 Details",
 			Value:  strings.Join(achievementDetails, "\n"),
