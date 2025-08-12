@@ -42,10 +42,22 @@ type BonusResult struct {
 // Bonus configuration constants
 const (
 	// Base bonus amounts
-	BaseHourlyBonus = 100  // 100 chips per hour
-	BaseDailyBonus  = 500  // 500 chips per day
-	BaseWeeklyBonus = 2500 // 2500 chips per week
-	BaseVoteBonus   = 1000 // 1000 chips per vote
+	BaseHourlyBonus = 25   // 25 chips per hour (matches Python)
+	BaseDailyBonus  = 150  // 150 chips per day (matches Python)
+	BaseWeeklyBonus = 600  // 600 chips per week (matches Python)
+	BaseVoteBonus   = 250  // 250 chips per vote (matches Python)
+
+	// Prestige bonus amounts (per prestige level)
+	PrestigeBonusHourly = 50   // 50 chips per prestige level for hourly
+	PrestigeBonusDaily  = 350  // 350 chips per prestige level for daily
+	PrestigeBonusWeekly = 1500 // 1500 chips per prestige level for weekly
+	PrestigeBonusVote   = 625  // 625 chips per prestige level for vote
+
+	// Level bonus amounts (per level)
+	LevelBonusHourly = 15  // 15 chips per level for hourly
+	LevelBonusDaily  = 75  // 75 chips per level for daily
+	LevelBonusWeekly = 300 // 300 chips per level for weekly
+	LevelBonusVote   = 125 // 125 chips per level for vote
 
 	// XP rewards
 	HourlyXP = 50   // 50 XP per hourly
@@ -70,6 +82,7 @@ type BonusManager struct{}
 
 // Global bonus manager
 var BonusMgr = &BonusManager{}
+
 
 // CanClaimBonus checks if a user can claim a specific bonus type
 func (bm *BonusManager) CanClaimBonus(user *User, bonusType BonusType) *BonusResult {
@@ -164,31 +177,46 @@ func (bm *BonusManager) ClaimBonus(user *User, bonusType BonusType) (*BonusResul
 }
 
 // calculateBonusAmount calculates the actual bonus amount based on user stats
+// Hybrid system: Python base formula + Go multiplier system
 func (bm *BonusManager) calculateBonusAmount(user *User, bonusType BonusType) *BonusInfo {
-	var baseAmount, xpAmount int64
+	var baseAmount, prestigeBonus, levelBonus, xpAmount int64
 	var cooldown time.Duration
 
-	// Get base amounts
+	// Get user level based on current XP and prestige
+	level := GetUserLevel(user.CurrentXP, user.Prestige)
+
+	// Get base amounts and bonuses per type (Python formula)
 	switch bonusType {
 	case BonusHourly:
 		baseAmount = BaseHourlyBonus
+		prestigeBonus = int64(user.Prestige) * PrestigeBonusHourly
+		levelBonus = int64(level) * LevelBonusHourly
 		xpAmount = HourlyXP
 		cooldown = HourlyCooldown
 	case BonusDaily:
 		baseAmount = BaseDailyBonus
+		prestigeBonus = int64(user.Prestige) * PrestigeBonusDaily
+		levelBonus = int64(level) * LevelBonusDaily
 		xpAmount = DailyXP
 		cooldown = DailyCooldown
 	case BonusWeekly:
 		baseAmount = BaseWeeklyBonus
+		prestigeBonus = int64(user.Prestige) * PrestigeBonusWeekly
+		levelBonus = int64(level) * LevelBonusWeekly
 		xpAmount = WeeklyXP
 		cooldown = WeeklyCooldown
 	case BonusVote:
 		baseAmount = BaseVoteBonus
+		prestigeBonus = int64(user.Prestige) * PrestigeBonusVote
+		levelBonus = int64(level) * LevelBonusVote
 		xpAmount = VoteXP
 		cooldown = VoteCooldown
 	}
 
-	// Calculate multipliers
+	// Calculate total amount from Python formula: base + prestige_amount + level_amount
+	pythonAmount := baseAmount + prestigeBonus + levelBonus
+
+	// Apply Go multiplier system
 	multiplier := 1.0
 
 	// Rank-based multiplier
@@ -201,18 +229,18 @@ func (bm *BonusManager) calculateBonusAmount(user *User, bonusType BonusType) *B
 		multiplier += rankProgress * (MaxRankMultiplier - 1.0)
 	}
 
-	// Prestige-based multiplier
+	// Prestige-based multiplier (additional to Python prestige bonus)
 	if user.Prestige > 0 {
-		prestigeBonus := float64(user.Prestige) * PrestigeMultiplier
-		if prestigeBonus > MaxPrestigeMultiplier-1.0 {
-			prestigeBonus = MaxPrestigeMultiplier - 1.0
+		prestigeMultiplierBonus := float64(user.Prestige) * PrestigeMultiplier
+		if prestigeMultiplierBonus > MaxPrestigeMultiplier-1.0 {
+			prestigeMultiplierBonus = MaxPrestigeMultiplier - 1.0
 		}
-		multiplier += prestigeBonus
+		multiplier += prestigeMultiplierBonus
 	}
 
-	// Apply multiplier
-	actualAmount := int64(float64(baseAmount) * multiplier)
-
+	// Apply multiplier to the Python formula result
+	actualAmount := int64(float64(pythonAmount) * multiplier)
+	
 	// Calculate streak bonus for daily bonuses
 	var streakBonus int64
 	if bonusType == BonusDaily {

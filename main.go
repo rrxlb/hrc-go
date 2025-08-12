@@ -189,6 +189,9 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 		// Start background cleanup loops (mines)
 		mines.StartCleanupLoop(s)
 		
+		// Initialize Top.gg client for voting
+		utils.InitializeTopGGClient(s.State.User.ID)
+		
 		// Initialize achievement system
 		if err := utils.InitializeAchievementManager(); err != nil {
 			log.Printf("Achievement manager init failed: %v", err)
@@ -251,6 +254,10 @@ func registerSlashCommands(s *discordgo.Session) error {
 		{
 			Name:        "claimall",
 			Description: "Claim all available bonuses",
+		},
+		{
+			Name:        "vote",
+			Description: "Vote for the bot on Top.gg to claim your bonus",
 		},
 		{
 			Name:        "premium",
@@ -377,6 +384,8 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			handleCooldownsCommand(s, i)
 		case "claimall":
 			handleClaimAllCommand(s, i)
+		case "vote":
+			handleVoteCommand(s, i)
 		case "leaderboard":
 			handleLeaderboardCommand(s, i)
 		case "prestige":
@@ -474,6 +483,10 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	if strings.HasPrefix(customID, "prestige_") {
 		handlePrestigeButtons(s, i)
+	}
+
+	if strings.HasPrefix(customID, "vote_") {
+		handleVoteButton(s, i)
 	}
 }
 
@@ -678,7 +691,7 @@ func handleHelpCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Categories similar to Python
 	cats := map[string][]string{
 		"Casino Games":   {"blackjack", "baccarat", "craps", "horl", "mines", "derby", "roulette", "slots", "tcpoker"},
-		"Bonuses":        {"hourly", "daily", "weekly", "claimall", "cooldowns"},
+		"Bonuses":        {"hourly", "daily", "weekly", "vote", "claimall", "cooldowns"},
 		"Profile / Rank": {"profile", "balance", "premium"},
 		"Admin":          {"addchips"},
 		"Help":           {"help"},
@@ -696,6 +709,7 @@ func handleHelpCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		"hourly":    "Claim your hourly bonus",
 		"daily":     "Claim your daily bonus",
 		"weekly":    "Claim your weekly bonus",
+		"vote":      "Vote on Top.gg for bonus chips",
 		"claimall":  "Claim all available bonuses",
 		"cooldowns": "View your bonus cooldowns",
 		"profile":   "View your casino profile and stats",
@@ -1005,6 +1019,123 @@ func respondWithError(s *discordgo.Session, i *discordgo.InteractionCreate, mess
 			Flags:   discordgo.MessageFlagsEphemeral,
 		},
 	})
+}
+
+func handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
+
+	// Check if Top.gg client is available
+	if utils.GlobalTopGGClient == nil {
+		embed := utils.CreateBrandedEmbed("❌ Vote Unavailable", 
+			"This feature is currently disabled. The bot owner needs to configure the Top.gg API token.", 
+			0xE74C3C)
+		utils.SendInteractionResponse(s, i, embed, nil, true)
+		return
+	}
+
+	// Get user data
+	user, err := utils.GetCachedUser(userID)
+	if err != nil {
+		respondWithError(s, i, "❌ Error accessing user data. Database may be unavailable.")
+		return
+	}
+
+	// Check internal cooldown
+	result := utils.BonusMgr.CanClaimBonus(user, utils.BonusVote)
+	if !result.Success {
+		// Show cooldown remaining
+		hours := int(result.TimeRemaining.Hours())
+		minutes := int(result.TimeRemaining.Minutes()) % 60
+		
+		embed := utils.CreateBrandedEmbed("🗳️ Vote Cooldown",
+			fmt.Sprintf("You have already claimed your vote bonus. You can claim again in %dh %dm.", hours, minutes),
+			0xE74C3C)
+		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
+			URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1754610906/TU_khaw12.png",
+		}
+		utils.SendInteractionResponse(s, i, embed, nil, true)
+		return
+	}
+
+	// Check Top.gg vote status
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	hasVoted, err := utils.GlobalTopGGClient.CheckUserVote(ctx, i.Member.User.ID)
+	if err != nil {
+		embed := utils.CreateBrandedEmbed("❌ Vote Check Failed",
+			"Could not verify your vote with Top.gg. Please try again later.",
+			0xE74C3C)
+		utils.SendInteractionResponse(s, i, embed, nil, true)
+		log.Printf("Top.gg vote check error for user %s: %v", i.Member.User.ID, err)
+		return
+	}
+
+	if hasVoted {
+		// Grant the vote bonus
+		bonusResult, err := utils.BonusMgr.ClaimBonus(user, utils.BonusVote)
+		if err != nil {
+			respondWithError(s, i, "❌ An error occurred while claiming vote bonus.")
+			return
+		}
+
+		// Create success embed
+		embed := utils.CreateBrandedEmbed("🗳️ Vote Bonus Claimed!",
+			fmt.Sprintf("Thank you for voting! Your vote was successfully counted.\n\n"+
+				"You gained **%d** %s chips.\n\n"+
+				"You can vote and claim again in 12 hours.",
+				bonusResult.BonusInfo.ActualAmount, utils.ChipsEmoji),
+			0x00FF00)
+		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
+			URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1754610906/TU_khaw12.png",
+		}
+		utils.SendInteractionResponse(s, i, embed, nil, true)
+
+		// Check for achievements (similar to Python version)
+		go func() {
+			if utils.AchievementMgr != nil {
+				// Get updated user for achievement checking
+				if updatedUser, err := utils.GetUser(userID); err == nil {
+					newlyAwarded, err := utils.AchievementMgr.CheckUserAchievements(updatedUser)
+					if err == nil && len(newlyAwarded) > 0 {
+						log.Printf("User %d earned %d achievements from voting", userID, len(newlyAwarded))
+						// Could send achievement notification here if needed
+					}
+				}
+			}
+		}()
+
+	} else {
+		// Show vote button
+		embed := utils.CreateBrandedEmbed("🗳️ Vote on Top.gg",
+			"You have not voted for the bot in the last 12 hours. "+
+			"Click the button below to vote, then run this command again to claim your reward!",
+			utils.BotColor)
+		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
+			URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1754610906/TU_khaw12.png",
+		}
+
+		// Create vote button
+		components := []discordgo.MessageComponent{
+			discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					discordgo.Button{
+						Label: "Vote on Top.gg",
+						Style: discordgo.LinkButton,
+						URL:   utils.GlobalTopGGClient.GetVoteURL(),
+						Emoji: &discordgo.ComponentEmoji{Name: "🗳️"},
+					},
+				},
+			},
+		}
+		
+		utils.SendInteractionResponse(s, i, embed, components, true)
+	}
+}
+
+func handleVoteButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	// For future use if we need specific vote button interactions
+	// Currently, the vote button is a link button that opens Top.gg directly
 }
 
 // sanitizeToken removes common accidental decorations around a token
