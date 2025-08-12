@@ -400,6 +400,13 @@ func EditOriginalInteraction(s *discordgo.Session, i *discordgo.InteractionCreat
 	return err
 }
 
+// GetOriginalResponseMessage fetches the original interaction response message.
+// It performs a no-op edit to retrieve the message object without changing content.
+func GetOriginalResponseMessage(s *discordgo.Session, i *discordgo.InteractionCreate) (*discordgo.Message, error) {
+	edit := &discordgo.WebhookEdit{}
+	return s.InteractionResponseEdit(i.Interaction, edit)
+}
+
 // BotLogf provides centralized formatted logging for component/game issues
 func BotLogf(area string, format string, args ...interface{}) {
 	log.Printf("[%s] "+format, append([]interface{}{area}, args...)...)

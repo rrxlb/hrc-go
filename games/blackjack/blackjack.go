@@ -20,21 +20,24 @@ var gamesMutex sync.RWMutex
 // BlackjackGame represents a blackjack game instance
 type BlackjackGame struct {
 	*utils.BaseGame
-	GameID              string
-	Bets                []int64
-	Deck                *utils.Deck
-	PlayerHands         []*utils.Hand
-	DealerHand          *utils.Hand
-	CurrentHand         int
-	InsuranceBet        int64
-	Results             []GameResult
-	NetProfit           int64
-	View                *utils.BlackjackView
-	OriginalInteraction *discordgo.InteractionCreate
-	IsRevealing         bool
-	InitialResponseSent bool
+	GameID                  string
+	Bets                    []int64
+	Deck                    *utils.Deck
+	PlayerHands             []*utils.Hand
+	DealerHand              *utils.Hand
+	CurrentHand             int
+	InsuranceBet            int64
+	Results                 []GameResult
+	NetProfit               int64
+	View                    *utils.BlackjackView
+	OriginalInteraction     *discordgo.InteractionCreate
+	IsRevealing             bool
+	InitialResponseSent     bool
 	InteractionAcknowledged bool
-	ComponentResponseSent bool
+	ComponentResponseSent   bool
+	// Fallback editing support when webhook token expires
+	ChannelID string
+	MessageID string
 }
 
 // GameResult represents the result of a blackjack hand
@@ -101,6 +104,11 @@ func (bg *BlackjackGame) StartGame() error {
 	err := utils.SendInteractionResponse(bg.Session, bg.Interaction, embed, components, false)
 	if err == nil {
 		bg.InitialResponseSent = true
+		// Capture original message ID for fallback edits later
+		if msg, ferr := utils.GetOriginalResponseMessage(bg.Session, bg.Interaction); ferr == nil && msg != nil {
+			bg.ChannelID = msg.ChannelID
+			bg.MessageID = msg.ID
+		}
 	}
 	return err
 }
@@ -283,7 +291,7 @@ func (bg *BlackjackGame) finishGame() error {
 
 	// Decide response method based on interaction type and whether initial response was sent
 	var errUpdate error
-	
+
 	// Skip update if interaction has already been acknowledged/failed
 	if !bg.InteractionAcknowledged {
 		if bg.Interaction.Type == discordgo.InteractionMessageComponent {
@@ -304,12 +312,24 @@ func (bg *BlackjackGame) finishGame() error {
 			// Slash command interaction with no initial response (natural blackjack): send initial response
 			errUpdate = utils.SendInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components, false)
 		}
-		
-		// If update fails, mark interaction as acknowledged
+
+		// If update fails, try fallback edit when webhook expired, then mark acknowledged
 		if errUpdate != nil {
-			bg.InteractionAcknowledged = true
-			// Don't return error, continue with game cleanup
-			errUpdate = nil
+			if bg.isWebhookExpired(errUpdate) {
+				if fErr := bg.fallbackEdit(embed, components); fErr == nil {
+					bg.InteractionAcknowledged = true
+					// Successful fallback; suppress error
+					errUpdate = nil
+				} else {
+					bg.InteractionAcknowledged = true
+					// Suppress to allow cleanup
+					errUpdate = nil
+				}
+			} else {
+				bg.InteractionAcknowledged = true
+				// Suppress to allow cleanup
+				errUpdate = nil
+			}
 		}
 	}
 
@@ -422,8 +442,8 @@ func (bg *BlackjackGame) updateViewOptions() {
 
 	// Double down: only on first two cards with value 9, 10, or 11, and if player can afford doubling that specific hand
 	handValue := currentHand.GetValue()
-	bg.View.CanDouble = currentHand.Size() == 2 && 
-		(handValue == 9 || handValue == 10 || handValue == 11) && 
+	bg.View.CanDouble = currentHand.Size() == 2 &&
+		(handValue == 9 || handValue == 10 || handValue == 11) &&
 		bg.UserData.Chips >= (bg.Bets[bg.CurrentHand])
 
 	// Split: only on first two cards of same rank and only if still single original hand
@@ -471,6 +491,14 @@ func (bg *BlackjackGame) updateGameState() error {
 
 	// If update fails, mark interaction as acknowledged to prevent further attempts
 	if err != nil {
+		// Attempt fallback edit via channel message if webhook expired
+		if bg.isWebhookExpired(err) {
+			if fErr := bg.fallbackEdit(embed, components); fErr == nil {
+				// Successful fallback; no need to keep trying webhook
+				bg.InteractionAcknowledged = true
+				return nil
+			}
+		}
 		bg.InteractionAcknowledged = true
 	}
 
@@ -505,11 +533,16 @@ func (bg *BlackjackGame) updateGameStateRevealing() error {
 
 	// If update fails, mark interaction as acknowledged to prevent further attempts
 	if err != nil {
-		bg.InteractionAcknowledged = true
-		// Log specific webhook errors for debugging
-		if strings.Contains(err.Error(), "Unknown Webhook") || strings.Contains(err.Error(), "404") {
+		// Attempt fallback edit via channel message if webhook expired
+		if bg.isWebhookExpired(err) {
+			if fErr := bg.fallbackEdit(embed, components); fErr == nil {
+				bg.InteractionAcknowledged = true
+				return nil
+			}
+			// Log specific webhook errors for debugging
 			log.Printf("Discord webhook expired for blackjack game %s (user %d)", bg.GameID, bg.UserID)
 		}
+		bg.InteractionAcknowledged = true
 	}
 
 	return err
@@ -699,6 +732,11 @@ func HandleBlackjackInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 
 	// Update the interaction reference
 	game.Interaction = i
+	// Capture message/channel for fallback edits
+	if i.Message != nil {
+		game.MessageID = i.Message.ID
+		game.ChannelID = i.ChannelID
+	}
 
 	// Handle the specific action
 	var actionErr error
@@ -725,6 +763,33 @@ func HandleBlackjackInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
+}
+
+// isWebhookExpired checks for Discord webhook expiration errors
+func (bg *BlackjackGame) isWebhookExpired(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Unknown Webhook") || strings.Contains(msg, "\"code\": 10015") || strings.Contains(msg, "404")
+}
+
+// fallbackEdit attempts to update the message via channel edit when webhook expired
+func (bg *BlackjackGame) fallbackEdit(embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
+	// Ensure we have IDs; try to pull from current interaction message as last resort
+	if bg.ChannelID == "" || bg.MessageID == "" {
+		if bg.Interaction != nil && bg.Interaction.Message != nil {
+			bg.ChannelID = bg.Interaction.ChannelID
+			bg.MessageID = bg.Interaction.Message.ID
+		}
+	}
+	if bg.ChannelID == "" || bg.MessageID == "" {
+		return fmt.Errorf("missing message/channel id for fallback edit")
+	}
+	embeds := []*discordgo.MessageEmbed{embed}
+	edit := &discordgo.MessageEdit{ID: bg.MessageID, Channel: bg.ChannelID, Embeds: &embeds, Components: &components}
+	_, err := bg.Session.ChannelMessageEditComplex(edit)
+	return err
 }
 
 // Helper functions
