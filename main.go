@@ -800,7 +800,7 @@ func buildPremiumEmbedAndComponents(member *discordgo.Member, user *utils.User) 
 	} else {
 		color = 0xE74C3C
 	}
-		embed := utils.CreateBrandedEmbed("💎 Premium Features", "", color)
+	embed := utils.CreateBrandedEmbed("💎 Premium Features", "", color)
 	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753753476/PR2_oxsxaa.png"}
 	var components []discordgo.MessageComponent
 	if hasRole {
