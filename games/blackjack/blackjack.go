@@ -321,7 +321,7 @@ func (bg *BlackjackGame) finishGame() error {
 	return nil
 }
 
-// playDealerHand plays the dealer's hand according to standard rules with animation
+// playDealerHand plays the dealer's hand according to standard rules with minimal animation
 func (bg *BlackjackGame) playDealerHand() error {
 	// Set revealing state to disable player actions
 	bg.IsRevealing = true
@@ -344,15 +344,6 @@ func (bg *BlackjackGame) playDealerHand() error {
 		return nil
 	}
 
-	// Initial delay before revealing dealer cards (optimized from 500ms to 250ms)
-	time.Sleep(250 * time.Millisecond)
-
-	// Update display to show dealer's full hand initially
-	if err := bg.updateGameStateRevealing(); err != nil {
-		log.Printf("Warning: failed to update game state during initial reveal: %v", err)
-		// Don't return error for display issues, continue with game logic
-	}
-
 	// Dealer plays: hit on soft 17 and below, stand on hard 17 and above
 	cardCount := 0
 	maxCards := 10 // Safety limit to prevent infinite loops
@@ -360,19 +351,16 @@ func (bg *BlackjackGame) playDealerHand() error {
 		// Deal next card
 		bg.DealerHand.AddCard(bg.Deck.Deal())
 		cardCount++
-
-		// Delay between cards (optimized from 300ms to 150ms)
-		time.Sleep(150 * time.Millisecond)
-
-		// Update display after each card
-		if err := bg.updateGameStateRevealing(); err != nil {
-			log.Printf("Warning: failed to update game state during card reveal: %v", err)
-			// Continue with animation even if display update fails
-		}
 	}
 
 	if cardCount >= maxCards {
 		log.Printf("Warning: dealer hit maximum card limit in blackjack game %s", bg.GameID)
+	}
+
+	// Single update at the end instead of multiple updates during animation
+	// This prevents Discord webhook errors and improves performance
+	if err := bg.updateGameStateRevealing(); err != nil {
+		log.Printf("Warning: failed to update game state after dealer play: %v", err)
 	}
 
 	return nil
@@ -518,6 +506,10 @@ func (bg *BlackjackGame) updateGameStateRevealing() error {
 	// If update fails, mark interaction as acknowledged to prevent further attempts
 	if err != nil {
 		bg.InteractionAcknowledged = true
+		// Log specific webhook errors for debugging
+		if strings.Contains(err.Error(), "Unknown Webhook") || strings.Contains(err.Error(), "404") {
+			log.Printf("Discord webhook expired for blackjack game %s (user %d)", bg.GameID, bg.UserID)
+		}
 	}
 
 	return err
