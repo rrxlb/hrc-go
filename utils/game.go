@@ -150,13 +150,13 @@ func (bg *BaseGame) EndGame(profit int64) (*User, error) {
 	bg.UserData = updatedUser
 	
 	// Check achievements with debouncing
-	go bg.checkAchievements(profit)
+	go bg.checkAchievements(profit, updatedUser)
 	
 	return updatedUser, nil
 }
 
 // checkAchievements checks and awards achievements for the user (with debouncing)
-func (bg *BaseGame) checkAchievements(profit int64) {
+func (bg *BaseGame) checkAchievements(profit int64, user *User) {
 	currentTime := time.Now()
 	
 	// Periodic cleanup of achievement check cache
@@ -175,10 +175,21 @@ func (bg *BaseGame) checkAchievements(profit int64) {
 	lastAchievementCheck[bg.UserID] = currentTime
 	achievementMutex.Unlock()
 	
-	// TODO: Implement achievement checking logic
-	// This would involve checking various achievement types and awarding them
-	// For now, just log that we would check achievements
-	log.Printf("Would check achievements for user %d with profit %d", bg.UserID, profit)
+	// Check for new achievements
+	if AchievementMgr != nil {
+		newAchievements, err := AchievementMgr.CheckUserAchievements(user)
+		if err != nil {
+			log.Printf("Error checking achievements for user %d: %v", bg.UserID, err)
+			return
+		}
+		
+		// Send notification if achievements were earned
+		if len(newAchievements) > 0 {
+			if err := SendAchievementNotification(bg.Session, bg.Interaction, newAchievements); err != nil {
+				log.Printf("Failed to send achievement notification to user %d: %v", bg.UserID, err)
+			}
+		}
+	}
 }
 
 // cleanupAchievementCache removes old entries from the achievement check cache

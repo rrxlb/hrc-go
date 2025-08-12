@@ -6,6 +6,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/bwmarrin/discordgo"
 )
 
 // AchievementCategory represents different categories of achievements
@@ -408,4 +410,36 @@ func (am *AchievementManager) GetAchievementsByCategory(category AchievementCate
 		}
 	}
 	return achievements
+}
+
+// SendAchievementNotification sends an ephemeral notification to the user about achieved achievements
+func SendAchievementNotification(session *discordgo.Session, interaction *discordgo.InteractionCreate, achievements []*Achievement) error {
+	if len(achievements) == 0 {
+		return nil
+	}
+
+	embed := CreateAchievementNotificationEmbed(achievements)
+	if embed == nil {
+		return fmt.Errorf("failed to create achievement notification embed")
+	}
+
+	// Send as ephemeral followup message
+	params := &discordgo.WebhookParams{
+		Embeds: []*discordgo.MessageEmbed{embed},
+		Flags:  discordgo.MessageFlagsEphemeral,
+	}
+
+	_, err := session.FollowupMessageCreate(interaction.Interaction, true, params)
+	if err != nil {
+		return fmt.Errorf("failed to send achievement notification: %w", err)
+	}
+
+	// Log the notification
+	if len(achievements) == 1 {
+		log.Printf("Sent achievement notification to user %s: %s", interaction.Member.User.ID, achievements[0].Name)
+	} else {
+		log.Printf("Sent %d achievement notifications to user %s", len(achievements), interaction.Member.User.ID)
+	}
+
+	return nil
 }

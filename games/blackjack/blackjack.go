@@ -344,8 +344,8 @@ func (bg *BlackjackGame) playDealerHand() error {
 		return nil
 	}
 
-	// Initial delay before revealing dealer cards (matching Python's 0.5s)
-	time.Sleep(500 * time.Millisecond)
+	// Initial delay before revealing dealer cards (optimized from 500ms to 250ms)
+	time.Sleep(250 * time.Millisecond)
 
 	// Update display to show dealer's full hand initially
 	if err := bg.updateGameStateRevealing(); err != nil {
@@ -361,8 +361,8 @@ func (bg *BlackjackGame) playDealerHand() error {
 		bg.DealerHand.AddCard(bg.Deck.Deal())
 		cardCount++
 
-		// Delay between cards (matching Python's 0.3s)
-		time.Sleep(300 * time.Millisecond)
+		// Delay between cards (optimized from 300ms to 150ms)
+		time.Sleep(150 * time.Millisecond)
 
 		// Update display after each card
 		if err := bg.updateGameStateRevealing(); err != nil {
@@ -655,15 +655,10 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 		return
 	}
 
-	// Create and start new game
+	// Create and start new game (user data already validated)
 	game := NewBlackjackGame(s, i, bet)
 	game.UserData = user
-
-	// Validate bet using base game
-	if err := game.ValidateBet(); err != nil {
-		respondWithError(s, i, err.Error())
-		return
-	}
+	// Skip redundant bet validation since we already checked above
 
 	// Store game in active games
 	gamesMutex.Lock()

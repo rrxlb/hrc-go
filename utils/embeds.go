@@ -600,3 +600,75 @@ func ThreeCardPokerEmbed(state string, playerHand []string, dealerHand []string,
 	}
 	return embed
 }
+
+// CreateAchievementNotificationEmbed creates an embed for achievement notifications
+func CreateAchievementNotificationEmbed(achievements []*Achievement) *discordgo.MessageEmbed {
+	if len(achievements) == 0 {
+		return nil
+	}
+
+	var title, description string
+	var totalChipsReward, totalXPReward int64
+
+	// Calculate total rewards
+	for _, achievement := range achievements {
+		totalChipsReward += achievement.ChipsReward
+		totalXPReward += achievement.XPReward
+	}
+
+	// Set title and description based on number of achievements
+	if len(achievements) == 1 {
+		achievement := achievements[0]
+		title = fmt.Sprintf("🎉 Achievement Unlocked!")
+		description = fmt.Sprintf("%s **%s**\n*%s*", achievement.Icon, achievement.Name, achievement.Description)
+	} else {
+		title = fmt.Sprintf("🎉 %d Achievements Unlocked!", len(achievements))
+		var lines []string
+		for _, achievement := range achievements {
+			lines = append(lines, fmt.Sprintf("%s **%s**", achievement.Icon, achievement.Name))
+		}
+		description = strings.Join(lines, "\n")
+	}
+
+	embed := CreateBrandedEmbed(title, description, 0xFFD700) // Gold color
+
+	// Set achievement thumbnail
+	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
+		URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753046175/ER2_fwidxb.png",
+	}
+
+	// Add rewards section if any rewards exist
+	if totalChipsReward > 0 || totalXPReward > 0 {
+		var rewardLines []string
+		
+		if totalChipsReward > 0 {
+			rewardLines = append(rewardLines, fmt.Sprintf("%s %s", FormatChips(totalChipsReward), ChipsEmoji))
+		}
+		
+		if totalXPReward > 0 {
+			rewardLines = append(rewardLines, fmt.Sprintf("%s XP", FormatChips(totalXPReward)))
+		}
+
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "🎁 Rewards",
+			Value:  strings.Join(rewardLines, "\n"),
+			Inline: false,
+		})
+	}
+
+	// Add individual achievement details for multiple achievements
+	if len(achievements) > 1 {
+		var achievementDetails []string
+		for _, achievement := range achievements {
+			achievementDetails = append(achievementDetails, fmt.Sprintf("**%s** - *%s*", achievement.Name, achievement.Description))
+		}
+		
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "📜 Details",
+			Value:  strings.Join(achievementDetails, "\n"),
+			Inline: false,
+		})
+	}
+
+	return embed
+}
