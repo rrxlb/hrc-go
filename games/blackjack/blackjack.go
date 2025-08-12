@@ -65,6 +65,7 @@ func NewBlackjackGame(session *discordgo.Session, interaction *discordgo.Interac
 		Results:             make([]GameResult, 0),
 		View:                utils.NewBlackjackView(baseGame.UserID, gameID),
 		OriginalInteraction: interaction,
+		ChannelID:           interaction.ChannelID,
 	}
 
 	return game
@@ -108,6 +109,15 @@ func (bg *BlackjackGame) StartGame() error {
 		if msg, ferr := utils.GetOriginalResponseMessage(bg.Session, bg.Interaction); ferr == nil && msg != nil {
 			bg.ChannelID = msg.ChannelID
 			bg.MessageID = msg.ID
+		} else {
+			// ChannelID is known from interaction; retry fetching the message shortly in case of race
+			go func(sess *discordgo.Session, inter *discordgo.InteractionCreate) {
+				time.Sleep(200 * time.Millisecond)
+				if m2, e2 := utils.GetOriginalResponseMessage(sess, inter); e2 == nil && m2 != nil {
+					bg.ChannelID = m2.ChannelID
+					bg.MessageID = m2.ID
+				}
+			}(bg.Session, bg.Interaction)
 		}
 	}
 	return err
@@ -378,9 +388,11 @@ func (bg *BlackjackGame) playDealerHand() error {
 	}
 
 	// Single update at the end instead of multiple updates during animation
-	// This prevents Discord webhook errors and improves performance
-	if err := bg.updateGameStateRevealing(); err != nil {
-		log.Printf("Warning: failed to update game state after dealer play: %v", err)
+	// Only attempt to update if there's already a message to edit (component or initial response sent)
+	if bg.Interaction.Type == discordgo.InteractionMessageComponent || bg.InitialResponseSent {
+		if err := bg.updateGameStateRevealing(); err != nil {
+			log.Printf("Warning: failed to update game state after dealer play: %v", err)
+		}
 	}
 
 	return nil
