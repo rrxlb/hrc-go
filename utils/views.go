@@ -302,7 +302,14 @@ func SendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreat
 
 	err := s.InteractionRespond(i.Interaction, response)
 	if err != nil {
-		log.Printf("SendInteractionResponse error (cmd=%s user=%s): %v", i.ApplicationCommandData().Name, i.Member.User.ID, err)
+		// Get command name safely based on interaction type
+		cmdName := "unknown"
+		if i.Type == discordgo.InteractionApplicationCommand {
+			cmdName = i.ApplicationCommandData().Name
+		} else if i.Type == discordgo.InteractionMessageComponent {
+			cmdName = i.MessageComponentData().CustomID
+		}
+		log.Printf("SendInteractionResponse error (cmd=%s user=%s): %v", cmdName, i.Member.User.ID, err)
 	}
 	return err
 }
