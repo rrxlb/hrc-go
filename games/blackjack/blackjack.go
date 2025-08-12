@@ -32,6 +32,7 @@ type BlackjackGame struct {
 	View                *utils.BlackjackView
 	OriginalInteraction *discordgo.InteractionCreate
 	IsRevealing         bool
+	InitialResponseSent bool
 }
 
 // GameResult represents the result of a blackjack hand
@@ -95,7 +96,11 @@ func (bg *BlackjackGame) StartGame() error {
 	embed := bg.createGameEmbed(false)
 	components := bg.View.GetComponents()
 
-	return utils.SendInteractionResponse(bg.Session, bg.Interaction, embed, components, false)
+	err := utils.SendInteractionResponse(bg.Session, bg.Interaction, embed, components, false)
+	if err == nil {
+		bg.InitialResponseSent = true
+	}
+	return err
 }
 
 // HandleHit handles the player hitting
@@ -279,9 +284,11 @@ func (bg *BlackjackGame) finishGame() error {
 	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
 		// Component interaction: send update message
 		errUpdate = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+	} else if bg.InitialResponseSent {
+		// Slash command interaction with initial response already sent: update the response
+		errUpdate = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
 	} else {
-		// Slash command interaction: if this is natural blackjack, send initial response instead of update
-		// For natural blackjack, no initial response was sent, so we send the first response
+		// Slash command interaction with no initial response (natural blackjack): send initial response
 		errUpdate = utils.SendInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components, false)
 	}
 	if errUpdate != nil {
