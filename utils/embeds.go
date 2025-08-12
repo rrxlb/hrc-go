@@ -356,7 +356,8 @@ func UserProfileEmbed(user *User, discordUser *discordgo.User, showWinLoss bool)
 
 	// Next rank progress
 	if nextRank != nil {
-		progressBar := createProgressBar(user.TotalXP, int64(rank.XPRequired), int64(nextRank.XPRequired), 10)
+		// Show progress as a proportion of total XP toward the next rank threshold
+		progressBar := createProgressBar(user.TotalXP, 0, int64(nextRank.XPRequired), 10)
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
 			Name:   "XP to Next Rank",
 			Value:  fmt.Sprintf("%s\n%s / %s", progressBar, FormatNumber(user.TotalXP), FormatNumber(int64(nextRank.XPRequired))),
