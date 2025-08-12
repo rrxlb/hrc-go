@@ -405,8 +405,11 @@ func (bg *BlackjackGame) updateViewOptions() {
 	bg.View.CanHit = !currentHand.IsBust()
 	bg.View.CanStand = true
 
-	// Double down: only on first two cards and if player can afford doubling that specific hand
-	bg.View.CanDouble = currentHand.Size() == 2 && bg.UserData.Chips >= (bg.Bets[bg.CurrentHand])
+	// Double down: only on first two cards with value 9, 10, or 11, and if player can afford doubling that specific hand
+	handValue := currentHand.GetValue()
+	bg.View.CanDouble = currentHand.Size() == 2 && 
+		(handValue == 9 || handValue == 10 || handValue == 11) && 
+		bg.UserData.Chips >= (bg.Bets[bg.CurrentHand])
 
 	// Split: only on first two cards of same rank and only if still single original hand
 	bg.View.CanSplit = currentHand.CanSplit() && len(bg.PlayerHands) == 1 && bg.UserData.Chips >= bg.Bets[bg.CurrentHand]
@@ -657,7 +660,8 @@ func HandleBlackjackInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 
 	if actionErr != nil {
 		log.Printf("Blackjack action error: %v", actionErr)
-		respondWithError(s, i, actionErr.Error())
+		// Don't send error response if the action might have already responded
+		// The action methods handle their own responses
 		return
 	}
 
