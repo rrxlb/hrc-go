@@ -190,7 +190,7 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 		mines.StartCleanupLoop(s)
 		
 		// Initialize Top.gg client for voting
-		utils.InitializeTopGGClient(s.State.User.ID)
+		utils.InitializeTopGGClient("1396564026233983108")
 		
 		// Initialize achievement system
 		if err := utils.InitializeAchievementManager(); err != nil {
