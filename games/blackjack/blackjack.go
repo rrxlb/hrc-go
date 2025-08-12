@@ -33,6 +33,7 @@ type BlackjackGame struct {
 	OriginalInteraction *discordgo.InteractionCreate
 	IsRevealing         bool
 	InitialResponseSent bool
+	InteractionAcknowledged bool
 }
 
 // GameResult represents the result of a blackjack hand
@@ -439,24 +440,52 @@ func (bg *BlackjackGame) updateViewOptions() {
 
 // updateGameState updates the game state display
 func (bg *BlackjackGame) updateGameState() error {
+	// Skip update if interaction has already been acknowledged/failed
+	if bg.InteractionAcknowledged {
+		return nil
+	}
+
 	embed := bg.createGameEmbed(false)
 	components := bg.View.GetComponents()
 
+	var err error
 	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-		return utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+	} else {
+		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
 	}
-	return utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+
+	// If update fails, mark interaction as acknowledged to prevent further attempts
+	if err != nil {
+		bg.InteractionAcknowledged = true
+	}
+
+	return err
 }
 
 // updateGameStateRevealing updates the game state during dealer card reveals
 func (bg *BlackjackGame) updateGameStateRevealing() error {
+	// Skip update if interaction has already been acknowledged/failed
+	if bg.InteractionAcknowledged {
+		return nil
+	}
+
 	embed := bg.createGameEmbed(true)         // Show as game over to reveal dealer cards
 	components := bg.View.DisableAllButtons() // Disable all buttons during reveal
 
+	var err error
 	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-		return utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+	} else {
+		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
 	}
-	return utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+
+	// If update fails, mark interaction as acknowledged to prevent further attempts
+	if err != nil {
+		bg.InteractionAcknowledged = true
+	}
+
+	return err
 }
 
 // createGameEmbed creates the Discord embed for the game state
