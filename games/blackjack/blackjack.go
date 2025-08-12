@@ -98,27 +98,31 @@ func (bg *BlackjackGame) StartGame() error {
 		bg.updateViewOptions() // re-evaluate with insurance available
 	}
 
-	// Send initial game state
+	// Send or update initial game state
 	embed := bg.createGameEmbed(false)
 	components := bg.View.GetComponents()
 
-	err := utils.SendInteractionResponse(bg.Session, bg.Interaction, embed, components, false)
-	if err == nil {
-		bg.InitialResponseSent = true
-		// Capture original message ID for fallback edits later
-		if msg, ferr := utils.GetOriginalResponseMessage(bg.Session, bg.Interaction); ferr == nil && msg != nil {
-			bg.ChannelID = msg.ChannelID
-			bg.MessageID = msg.ID
-		} else {
-			// ChannelID is known from interaction; retry fetching the message shortly in case of race
-			go func(sess *discordgo.Session, inter *discordgo.InteractionCreate) {
-				time.Sleep(200 * time.Millisecond)
-				if m2, e2 := utils.GetOriginalResponseMessage(sess, inter); e2 == nil && m2 != nil {
-					bg.ChannelID = m2.ChannelID
-					bg.MessageID = m2.ID
-				}
-			}(bg.Session, bg.Interaction)
+	var err error
+	if bg.InitialResponseSent {
+		// Interaction likely deferred earlier; update the original response
+		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+	} else {
+		// No prior response; send initial response now
+		err = utils.SendInteractionResponse(bg.Session, bg.Interaction, embed, components, false)
+		if err == nil {
+			bg.InitialResponseSent = true
 		}
+	}
+
+	if err == nil {
+		// Capture original message ID for fallback edits later (async to avoid blocking)
+		go func(sess *discordgo.Session, inter *discordgo.InteractionCreate) {
+			time.Sleep(200 * time.Millisecond)
+			if m2, e2 := utils.GetOriginalResponseMessage(sess, inter); e2 == nil && m2 != nil {
+				bg.ChannelID = m2.ChannelID
+				bg.MessageID = m2.ID
+			}
+		}(bg.Session, bg.Interaction)
 	}
 	return err
 }
@@ -636,72 +640,81 @@ func (bg *BlackjackGame) createGameEmbed(gameOver bool) *discordgo.MessageEmbed 
 
 // HandleBlackjackCommand handles the /blackjack slash command
 func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	// Measure only pre-deferral overhead to keep logs actionable
 	start := time.Now()
-	defer func() {
-		duration := time.Since(start)
-		if duration > 100*time.Millisecond {
-			log.Printf("Slow blackjack command: %dms", duration.Milliseconds())
+
+	// Defer immediately to acknowledge the interaction quickly
+	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
+		// If deferral fails, fall back to normal error response path
+		respondWithError(s, i, "Failed to acknowledge command")
+		return
+	}
+
+	ackDuration := time.Since(start)
+	if ackDuration > 100*time.Millisecond {
+		log.Printf("Slow blackjack command ack: %dms", ackDuration.Milliseconds())
+	}
+
+	// Continue heavy work asynchronously so the handler returns fast
+	go func(sess *discordgo.Session, inter *discordgo.InteractionCreate) {
+		// Parse bet amount
+		betOption := inter.ApplicationCommandData().Options[0]
+		betStr := betOption.StringValue()
+
+		userID, err := parseUserID(inter.Member.User.ID)
+		if err != nil {
+			respondWithError(sess, inter, "Failed to parse user ID")
+			return
 		}
-	}()
 
-	// Parse bet amount
-	betOption := i.ApplicationCommandData().Options[0]
-	betStr := betOption.StringValue()
+		// Get user data to validate bet
+		user, err := utils.GetCachedUser(userID)
+		if err != nil {
+			respondWithError(sess, inter, "Failed to get user data")
+			return
+		}
 
-	userID, err := parseUserID(i.Member.User.ID)
-	if err != nil {
-		respondWithError(s, i, "Failed to parse user ID")
-		return
-	}
+		// Parse and validate bet
+		bet, err := utils.ParseBet(betStr, user.Chips)
+		if err != nil {
+			respondWithError(sess, inter, "Invalid bet amount: "+err.Error())
+			return
+		}
 
-	// Get user data to validate bet
-	user, err := utils.GetCachedUser(userID)
-	if err != nil {
-		respondWithError(s, i, "Failed to get user data")
-		return
-	}
+		if bet <= 0 {
+			respondWithError(sess, inter, "Bet amount must be greater than 0")
+			return
+		}
 
-	// Parse and validate bet
-	bet, err := utils.ParseBet(betStr, user.Chips)
-	if err != nil {
-		respondWithError(s, i, "Invalid bet amount: "+err.Error())
-		return
-	}
+		if user.Chips < bet {
+			embed := utils.InsufficientChipsEmbed(bet, user.Chips, "blackjack")
+			utils.UpdateInteractionResponse(sess, inter, embed, nil)
+			return
+		}
 
-	if bet <= 0 {
-		respondWithError(s, i, "Bet amount must be greater than 0")
-		return
-	}
+		// Create and start new game (user data already validated)
+		game := NewBlackjackGame(sess, inter, bet)
+		game.UserData = user
+		// Mark that the original interaction was deferred so StartGame updates it
+		game.InitialResponseSent = true
 
-	if user.Chips < bet {
-		embed := utils.InsufficientChipsEmbed(bet, user.Chips, "blackjack")
-		utils.SendInteractionResponse(s, i, embed, nil, true)
-		return
-	}
-
-	// Create and start new game (user data already validated)
-	game := NewBlackjackGame(s, i, bet)
-	game.UserData = user
-	// Skip redundant bet validation since we already checked above
-
-	// Store game in active games
-	gamesMutex.Lock()
-	ActiveGames[game.GameID] = game
-	gamesMutex.Unlock()
-
-	// Start the game
-	if err := game.StartGame(); err != nil {
-		log.Printf("Failed to start blackjack game: %v", err)
-		respondWithError(s, i, "Failed to start game")
-
-		// Clean up failed game
+		// Store game in active games
 		gamesMutex.Lock()
-		delete(ActiveGames, game.GameID)
+		ActiveGames[game.GameID] = game
 		gamesMutex.Unlock()
-		return
-	}
 
-	log.Printf("Started blackjack game %s for user %d with bet %d", game.GameID, userID, bet)
+		// Start the game
+		if err := game.StartGame(); err != nil {
+			log.Printf("Failed to start blackjack game: %v", err)
+			respondWithError(sess, inter, "Failed to start game")
+
+			// Clean up failed game
+			gamesMutex.Lock()
+			delete(ActiveGames, game.GameID)
+			gamesMutex.Unlock()
+			return
+		}
+	}(s, i)
 }
 
 // HandleBlackjackInteraction handles component interactions for blackjack games
