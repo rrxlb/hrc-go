@@ -1171,7 +1171,7 @@ func handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 		// Create success embed - matching Python format
 		embed := utils.CreateBrandedEmbed("🗳️ Vote Bonus Claimed!",
-			fmt.Sprintf("Thank you for voting! Your vote was successfully counted.\n\n"+
+			fmt.Sprintf("Thank you for voting! Your vote was successfully counted and helps us a tremendous amount!\n\n"+
 				"You gained **%s** %s chips.\n\n"+
 				"You can vote and claim again in 12 hours.",
 				utils.FormatChips(bonusResult.BonusInfo.ActualAmount), utils.ChipsEmoji),
