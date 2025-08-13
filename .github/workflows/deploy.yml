@@ -1,0 +1,22 @@
+name: Deploy Bot
+
+on:
+  push:
+    branches:
+      - main # Or whatever your main branch is called
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to DigitalOcean
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /root/hrc-go
+            git pull
+            /usr/local/go/bin/go build -o hrc-bot
+            systemctl restart discord-bot.service
