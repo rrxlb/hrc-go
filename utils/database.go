@@ -147,15 +147,6 @@ var (
 	DB            *pgxpool.Pool
 	dbInitialized = false
 	dbMutex       sync.RWMutex
-
-	// Prepared statements for performance optimization
-	preparedStmts struct {
-		getUserStmt         string
-		leaderboardChips    string
-		leaderboardXP       string
-		leaderboardPrestige string
-		stmtMutex           sync.RWMutex
-	}
 )
 
 // SetupDatabase initializes the database connection pool
@@ -222,10 +213,8 @@ func SetupDatabase() error {
 		log.Printf("Warning: Failed to create performance indexes: %v", err)
 	}
 
-	// Prepare common statements for performance
-	if err := prepareStatements(); err != nil {
-		log.Printf("Warning: Failed to prepare statements: %v", err)
-	}
+	// Note: Prepared statements removed due to connection pool compatibility issues
+	// Database queries will use direct SQL for reliable operation
 
 	return nil
 }
@@ -281,57 +270,31 @@ func GetUser(userID int64) (*User, error) {
 		}
 	}()
 
-	// Use prepared statement if available
-	preparedStmts.stmtMutex.RLock()
-	usePrepared := preparedStmts.getUserStmt != ""
-	preparedStmts.stmtMutex.RUnlock()
+	// Use direct SQL query for reliable operation
+	query := `
+		SELECT user_id, chips, total_xp, current_xp, prestige, wins, losses, 
+			   daily_bonuses_claimed, votes_count, last_hourly, last_daily, 
+			   last_weekly, last_vote, last_bonus, premium_settings, created_at
+		FROM users WHERE user_id = $1`
 
-	if usePrepared {
-		err = DB.QueryRow(ctx, "get_user", userID).Scan(
-			&user.UserID,
-			&user.Chips,
-			&user.TotalXP,
-			&user.CurrentXP,
-			&user.Prestige,
-			&user.Wins,
-			&user.Losses,
-			&user.DailyBonusesClaimed,
-			&user.VotesCount,
-			&user.LastHourly,
-			&user.LastDaily,
-			&user.LastWeekly,
-			&user.LastVote,
-			&user.LastBonus,
-			&user.PremiumSettings,
-			&user.CreatedAt,
-		)
-	} else {
-		// Fallback to direct query
-		query := `
-			SELECT user_id, chips, total_xp, current_xp, prestige, wins, losses, 
-				   daily_bonuses_claimed, votes_count, last_hourly, last_daily, 
-				   last_weekly, last_vote, last_bonus, premium_settings, created_at
-			FROM users WHERE user_id = $1`
-
-		err = DB.QueryRow(ctx, query, userID).Scan(
-			&user.UserID,
-			&user.Chips,
-			&user.TotalXP,
-			&user.CurrentXP,
-			&user.Prestige,
-			&user.Wins,
-			&user.Losses,
-			&user.DailyBonusesClaimed,
-			&user.VotesCount,
-			&user.LastHourly,
-			&user.LastDaily,
-			&user.LastWeekly,
-			&user.LastVote,
-			&user.LastBonus,
-			&user.PremiumSettings,
-			&user.CreatedAt,
-		)
-	}
+	err = DB.QueryRow(ctx, query, userID).Scan(
+		&user.UserID,
+		&user.Chips,
+		&user.TotalXP,
+		&user.CurrentXP,
+		&user.Prestige,
+		&user.Wins,
+		&user.Losses,
+		&user.DailyBonusesClaimed,
+		&user.VotesCount,
+		&user.LastHourly,
+		&user.LastDaily,
+		&user.LastWeekly,
+		&user.LastVote,
+		&user.LastBonus,
+		&user.PremiumSettings,
+		&user.CreatedAt,
+	)
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -831,91 +794,23 @@ func createPerformanceIndexes() error {
 	return nil
 }
 
-// prepareStatements prepares commonly used queries for better performance
-func prepareStatements() error {
-	if DB == nil {
-		return fmt.Errorf("database not connected")
-	}
 
-	ctx := context.Background()
-	preparedStmts.stmtMutex.Lock()
-	defer preparedStmts.stmtMutex.Unlock()
-
-	// Get user statement
-	getUserQuery := `
-		SELECT user_id, chips, total_xp, current_xp, prestige, wins, losses, 
-			   daily_bonuses_claimed, votes_count, last_hourly, last_daily, 
-			   last_weekly, last_vote, last_bonus, premium_settings, created_at
-		FROM users WHERE user_id = $1`
-
-	conn, err := DB.Acquire(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to acquire connection for preparing statements: %w", err)
-	}
-	defer conn.Release()
-
-	_, err = conn.Conn().Prepare(ctx, "get_user", getUserQuery)
-	if err != nil {
-		return fmt.Errorf("failed to prepare get_user statement: %w", err)
-	}
-	preparedStmts.getUserStmt = "get_user"
-
-	// Leaderboard statements
-	leaderboardChipsQuery := "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10"
-	_, err = conn.Conn().Prepare(ctx, "leaderboard_chips", leaderboardChipsQuery)
-	if err != nil {
-		return fmt.Errorf("failed to prepare leaderboard_chips statement: %w", err)
-	}
-	preparedStmts.leaderboardChips = "leaderboard_chips"
-
-	leaderboardXPQuery := "SELECT user_id, total_xp FROM users ORDER BY total_xp DESC, user_id LIMIT 10"
-	_, err = conn.Conn().Prepare(ctx, "leaderboard_xp", leaderboardXPQuery)
-	if err != nil {
-		return fmt.Errorf("failed to prepare leaderboard_xp statement: %w", err)
-	}
-	preparedStmts.leaderboardXP = "leaderboard_xp"
-
-	leaderboardPrestigeQuery := "SELECT user_id, prestige FROM users ORDER BY prestige DESC, user_id LIMIT 10"
-	_, err = conn.Conn().Prepare(ctx, "leaderboard_prestige", leaderboardPrestigeQuery)
-	if err != nil {
-		return fmt.Errorf("failed to prepare leaderboard_prestige statement: %w", err)
-	}
-	preparedStmts.leaderboardPrestige = "leaderboard_prestige"
-
-	log.Println("Prepared statements created successfully")
-	return nil
-}
-
-// GetLeaderboard executes optimized leaderboard query using prepared statements
+// GetLeaderboard executes leaderboard query with direct SQL for reliable operation
 func GetLeaderboard(leaderboardType string) (pgx.Rows, error) {
 	if DB == nil {
 		return nil, fmt.Errorf("database not connected")
 	}
 
 	ctx := context.Background()
-	preparedStmts.stmtMutex.RLock()
-	defer preparedStmts.stmtMutex.RUnlock()
 
 	switch leaderboardType {
 	case "chips":
-		if preparedStmts.leaderboardChips != "" {
-			return DB.Query(ctx, "leaderboard_chips")
-		}
 		return DB.Query(ctx, "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10")
 	case "xp":
-		if preparedStmts.leaderboardXP != "" {
-			return DB.Query(ctx, "leaderboard_xp")
-		}
 		return DB.Query(ctx, "SELECT user_id, total_xp FROM users ORDER BY total_xp DESC, user_id LIMIT 10")
 	case "prestige":
-		if preparedStmts.leaderboardPrestige != "" {
-			return DB.Query(ctx, "leaderboard_prestige")
-		}
 		return DB.Query(ctx, "SELECT user_id, prestige FROM users ORDER BY prestige DESC, user_id LIMIT 10")
 	default:
-		if preparedStmts.leaderboardChips != "" {
-			return DB.Query(ctx, "leaderboard_chips")
-		}
 		return DB.Query(ctx, "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10")
 	}
 }
