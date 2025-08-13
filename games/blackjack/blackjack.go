@@ -214,6 +214,8 @@ func (bg *BlackjackGame) HandleDouble() error {
 		return fmt.Errorf("game is already over")
 	}
 
+	log.Printf("Processing double down for game %s, current state: %d", bg.GameID, bg.State)
+
 	// Check if player can afford to double
 	if bg.UserData.Chips < bg.Bets[bg.CurrentHand] {
 		return fmt.Errorf("insufficient chips to double down")
@@ -226,6 +228,7 @@ func (bg *BlackjackGame) HandleDouble() error {
 	currentHand := bg.PlayerHands[bg.CurrentHand]
 	currentHand.AddCard(bg.Deck.Deal())
 
+	log.Printf("After double down card deal - hand value: %d, proceeding to stand", currentHand.GetValue())
 	return bg.standCurrentHand()
 }
 
@@ -301,12 +304,16 @@ func (bg *BlackjackGame) HandleInsurance() error {
 func (bg *BlackjackGame) standCurrentHand() error {
 	bg.CurrentHand++
 
+	log.Printf("standCurrentHand: CurrentHand=%d, TotalHands=%d, State=%d", bg.CurrentHand, len(bg.PlayerHands), bg.State)
+
 	if bg.CurrentHand >= len(bg.PlayerHands) {
 		// All hands completed, finish the game
+		log.Printf("All hands completed for game %s, finishing game", bg.GameID)
 		return bg.finishGame()
 	}
 
 	// Move to next hand
+	log.Printf("Moving to next hand for game %s", bg.GameID)
 	bg.updateViewOptions()
 	return bg.updateGameState()
 }
@@ -413,7 +420,8 @@ func (bg *BlackjackGame) finishGame() error {
 
 	if bg.State != StateFinished {
 		if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-			// Component interaction - send update
+			// Component interaction - send update (this was likely a double down button)
+			log.Printf("Sending final game state via component interaction for game %s", bg.GameID)
 			errUpdate = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
 		} else if bg.State == StateDeferred || bg.State == StateActive {
 			// Update deferred response
@@ -423,10 +431,16 @@ func (bg *BlackjackGame) finishGame() error {
 			errUpdate = utils.SendInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components, false)
 		}
 
-		// If update fails, try fallback edit
-		if errUpdate != nil && bg.isWebhookExpired(errUpdate) {
-			if fErr := bg.fallbackEdit(embed, components); fErr == nil {
-				errUpdate = nil // Successful fallback
+		// If update fails, try fallback edit via channel message
+		if errUpdate != nil {
+			log.Printf("Failed to send final game state: %v", errUpdate)
+			if bg.isWebhookExpired(errUpdate) {
+				if fErr := bg.fallbackEdit(embed, components); fErr == nil {
+					log.Printf("Successfully used fallback edit for game %s", bg.GameID)
+					errUpdate = nil // Successful fallback
+				} else {
+					log.Printf("Fallback edit also failed for game %s: %v", bg.GameID, fErr)
+				}
 			}
 		}
 	}
@@ -472,13 +486,8 @@ func (bg *BlackjackGame) playDealerHand() error {
 		log.Printf("Warning: dealer hit maximum card limit in blackjack game %s", bg.GameID)
 	}
 
-	// Single update at the end instead of multiple updates during animation
-	// Only attempt to update if we're in an active state
-	if bg.State == StateRevealing || bg.State == StateActive {
-		if err := bg.updateGameStateRevealing(); err != nil {
-			log.Printf("Warning: failed to update game state after dealer play: %v", err)
-		}
-	}
+	// Skip intermediate update - finishGame will send the final state
+	// This prevents double interaction consumption issues
 
 	return nil
 }
@@ -903,6 +912,12 @@ func HandleBlackjackInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		log.Printf("Blackjack action error: %v", actionErr)
 		// Don't send error response if the action might have already responded
 		// The action methods handle their own responses
+		return
+	}
+
+	// Check if game was completed by the action (e.g., double down finishing the game)
+	if game.State == StateFinished {
+		log.Printf("Game %s completed after %s action", game.GameID, customID)
 		return
 	}
 
