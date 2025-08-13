@@ -1053,15 +1053,8 @@ func handleClaimAllCommand(s *discordgo.Session, i *discordgo.InteractionCreate)
 	}
 
 	if len(claimedBonuses) == 0 {
-		embed := &discordgo.MessageEmbed{
-			Title:       "🎁 Claim All Bonuses",
-			Description: "❌ No bonuses are currently available to claim.",
-			Color:       0xff6b6b,
-			Footer: &discordgo.MessageEmbedFooter{
-				Text: "Bonus System",
-			},
-			Timestamp: time.Now().Format(time.RFC3339),
-		}
+		embed := utils.CreateBrandedEmbed("🎁 Claim All Bonuses",
+			"You have no bonuses available to claim.", 0xE74C3C)
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -1072,44 +1065,33 @@ func handleClaimAllCommand(s *discordgo.Session, i *discordgo.InteractionCreate)
 		return
 	}
 
-	// Calculate totals
+	// Calculate totals and build bonus list
 	var totalChips, totalXP int64
-	bonusTypes := make([]string, 0)
+	claimedList := make([]string, 0)
 
 	for _, bonus := range claimedBonuses {
 		if bonus.Success && bonus.BonusInfo != nil {
 			totalChips += bonus.BonusInfo.ActualAmount
 			totalXP += bonus.BonusInfo.XPAmount
-			bonusTypes = append(bonusTypes, string(bonus.BonusInfo.Type))
+
+			// Format bonus line like Python version
+			bonusName := strings.Title(string(bonus.BonusInfo.Type))
+			claimedList = append(claimedList,
+				fmt.Sprintf("• **%s**: %s %s", bonusName,
+					utils.FormatChips(bonus.BonusInfo.ActualAmount), utils.ChipsEmoji))
 		}
 	}
 
-	embed := &discordgo.MessageEmbed{
-		Title:       "🎁 Claim All Bonuses",
-		Description: fmt.Sprintf("Successfully claimed %d bonuses!", len(claimedBonuses)),
-		Color:       0x00ff00,
-		Fields: []*discordgo.MessageEmbedField{
-			{
-				Name:   "💰 Total Chips",
-				Value:  fmt.Sprintf("%d %s", totalChips, utils.ChipsEmoji),
-				Inline: true,
-			},
-			{
-				Name:   "⭐ Total XP",
-				Value:  fmt.Sprintf("%d XP", totalXP),
-				Inline: true,
-			},
-			{
-				Name:   "🎯 Bonuses Claimed",
-				Value:  strings.Join(bonusTypes, ", "),
-				Inline: false,
-			},
-		},
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "Bonus System",
-		},
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
+	// Get updated user balance for display
+	updatedUser, _ := utils.GetUser(userID)
+
+	// Create clean, user-friendly embed matching Python format
+	description := fmt.Sprintf("**Bonuses Claimed:**\n%s\n\n**Total**: %s %s\n**New Balance**: %s %s",
+		strings.Join(claimedList, "\n"),
+		utils.FormatChips(totalChips), utils.ChipsEmoji,
+		utils.FormatChips(updatedUser.Chips), utils.ChipsEmoji)
+
+	embed := utils.CreateBrandedEmbed("All Bonuses Claimed!", description, 0x00FF00)
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -1187,12 +1169,12 @@ func handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 
-		// Create success embed
+		// Create success embed - matching Python format
 		embed := utils.CreateBrandedEmbed("🗳️ Vote Bonus Claimed!",
 			fmt.Sprintf("Thank you for voting! Your vote was successfully counted.\n\n"+
-				"You gained **%d** %s chips.\n\n"+
+				"You gained **%s** %s chips.\n\n"+
 				"You can vote and claim again in 12 hours.",
-				bonusResult.BonusInfo.ActualAmount, utils.ChipsEmoji),
+				utils.FormatChips(bonusResult.BonusInfo.ActualAmount), utils.ChipsEmoji),
 			0x00FF00)
 		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
 			URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1754610906/TU_khaw12.png",

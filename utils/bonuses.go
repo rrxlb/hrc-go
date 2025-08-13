@@ -289,8 +289,10 @@ func (bm *BonusManager) GetAllCooldowns(user *User) map[BonusType]*BonusResult {
 }
 
 // ClaimAllAvailableBonuses claims all available bonuses for a user
+// Note: Vote bonus is excluded from claimall as it requires manual Top.gg verification
 func (bm *BonusManager) ClaimAllAvailableBonuses(user *User) ([]*BonusResult, error) {
-	bonusTypes := []BonusType{BonusHourly, BonusDaily, BonusWeekly, BonusVote}
+	// Exclude vote bonus - it requires separate Top.gg verification via /vote command
+	bonusTypes := []BonusType{BonusHourly, BonusDaily, BonusWeekly}
 	var claimedBonuses []*BonusResult
 	var totalChips, totalXP int64
 
@@ -420,14 +422,9 @@ func (bm *BonusManager) CreateBonusEmbed(user *User, bonusResult *BonusResult, t
 func (bm *BonusManager) CreateCooldownEmbed(user *User) *discordgo.MessageEmbed {
 	cooldowns := bm.GetAllCooldowns(user)
 
-	embed := &discordgo.MessageEmbed{
-		Title:       "🕒 Bonus Cooldowns",
-		Description: fmt.Sprintf("Bonus status for <@%d>", user.UserID),
-		Color:       BotColor,
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "Bonus System",
-		},
-		Timestamp: time.Now().Format(time.RFC3339),
+	embed := CreateBrandedEmbed("🕒 Bonus Cooldowns", "Check your bonus availability and cooldown timers", BotColor)
+	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
+		URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1754610906/TU_khaw12.png",
 	}
 
 	bonusNames := map[BonusType]string{
@@ -442,9 +439,12 @@ func (bm *BonusManager) CreateCooldownEmbed(user *User) *discordgo.MessageEmbed 
 		var value string
 
 		if result.Success {
-			// Bonus is available
-			value = fmt.Sprintf("✅ Ready! (%d %s)",
-				result.BonusInfo.ActualAmount, ChipsEmoji)
+			// Bonus is available - clean format without chip amounts
+			if bonusType == BonusVote {
+				value = "✅ Ready! (Use /vote to claim)"
+			} else {
+				value = "✅ Ready!"
+			}
 		} else {
 			// Show time remaining
 			if result.TimeRemaining > 0 {

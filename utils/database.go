@@ -794,7 +794,6 @@ func createPerformanceIndexes() error {
 	return nil
 }
 
-
 // GetLeaderboard executes leaderboard query with direct SQL for reliable operation
 func GetLeaderboard(leaderboardType string) (pgx.Rows, error) {
 	if DB == nil {
