@@ -140,7 +140,22 @@ func SetupDatabase() error {
 	}
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, databaseURL)
+
+	// Parse the database URL to add connection pool optimizations
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse database URL: %w", err)
+	}
+
+	// Optimize connection pool for Discord bot workload
+	config.MaxConns = 10               // Reasonable for bot workload
+	config.MinConns = 2                // Keep minimum connections ready
+	config.MaxConnLifetime = time.Hour // Prevent stale connections
+	config.MaxConnIdleTime = 30 * time.Minute
+	config.HealthCheckPeriod = 1 * time.Minute
+
+	// Create optimized connection pool
+	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return fmt.Errorf("failed to create connection pool: %w", err)
 	}
@@ -198,7 +213,7 @@ func GetUser(userID int64) (*User, error) {
 			log.Printf("Slow database GetUser: %dms", duration.Milliseconds())
 		}
 	}()
-	
+
 	if DB == nil {
 		return &User{
 			UserID:              userID,
@@ -683,9 +698,9 @@ func createPerformanceIndexes() error {
 	if DB == nil {
 		return fmt.Errorf("database not connected")
 	}
-	
+
 	ctx := context.Background()
-	
+
 	// Indexes for leaderboard queries (chips, total_xp, prestige)
 	indexes := []string{
 		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_chips_desc ON users(chips DESC, user_id)",
@@ -695,14 +710,14 @@ func createPerformanceIndexes() error {
 		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_wins ON users(wins)",
 		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_created_at ON users(created_at)",
 	}
-	
+
 	for _, query := range indexes {
 		if _, err := DB.Exec(ctx, query); err != nil {
 			// Log but don't fail - indexes might already exist
 			log.Printf("Index creation info: %v", err)
 		}
 	}
-	
+
 	log.Println("Performance indexes created/verified successfully")
 	return nil
 }

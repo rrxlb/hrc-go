@@ -5,7 +5,6 @@
 // the migration from the Python codebase for reference. Once the migration
 // is complete, remove this file entirely.
 package utils
-package utils
 
 import (
 	"fmt"
@@ -20,19 +19,19 @@ import (
 type GameAction string
 
 const (
-	ActionHit      GameAction = "hit"
-	ActionStand    GameAction = "stand"
-	ActionDouble   GameAction = "double"
-	ActionSplit    GameAction = "split"
+	ActionHit       GameAction = "hit"
+	ActionStand     GameAction = "stand"
+	ActionDouble    GameAction = "double"
+	ActionSplit     GameAction = "split"
 	ActionSurrender GameAction = "surrender"
 	ActionInsurance GameAction = "insurance"
-	ActionBet      GameAction = "bet"
-	ActionCall     GameAction = "call"
-	ActionFold     GameAction = "fold"
-	ActionRaise    GameAction = "raise"
-	ActionSpin     GameAction = "spin"
-	ActionCashout  GameAction = "cashout"
-	ActionReveal   GameAction = "reveal"
+	ActionBet       GameAction = "bet"
+	ActionCall      GameAction = "call"
+	ActionFold      GameAction = "fold"
+	ActionRaise     GameAction = "raise"
+	ActionSpin      GameAction = "spin"
+	ActionCashout   GameAction = "cashout"
+	ActionReveal    GameAction = "reveal"
 )
 
 // GameStatus represents the current state of a game
@@ -48,24 +47,24 @@ const (
 
 // GameResult represents the outcome of a game
 type GameResult struct {
-	Winner        string            `json:"winner"`         // "player", "dealer", "tie", etc.
-	PayoutMultiplier float64        `json:"payout_multiplier"`
-	ChipsWon      int64             `json:"chips_won"`
-	XPAwarded     int64             `json:"xp_awarded"`
-	Details       map[string]interface{} `json:"details,omitempty"`
-	JackpotWon    *JackpotWinInfo   `json:"jackpot_won,omitempty"`
+	Winner           string                 `json:"winner"` // "player", "dealer", "tie", etc.
+	PayoutMultiplier float64                `json:"payout_multiplier"`
+	ChipsWon         int64                  `json:"chips_won"`
+	XPAwarded        int64                  `json:"xp_awarded"`
+	Details          map[string]interface{} `json:"details,omitempty"`
+	JackpotWon       *JackpotWinInfo        `json:"jackpot_won,omitempty"`
 }
 
 // GameData contains the current state and information about a game
 type GameData struct {
-	Hand          *Hand                  `json:"hand,omitempty"`
-	DealerHand    *Hand                  `json:"dealer_hand,omitempty"`
-	Deck          *Deck                  `json:"deck,omitempty"`
-	Bets          []int64                `json:"bets"`
-	CurrentBet    int64                  `json:"current_bet"`
-	Round         int                    `json:"round"`
-	TurnIndex     int                    `json:"turn_index"`
-	CustomData    map[string]interface{} `json:"custom_data,omitempty"`
+	Hand       *Hand                  `json:"hand,omitempty"`
+	DealerHand *Hand                  `json:"dealer_hand,omitempty"`
+	Deck       *Deck                  `json:"deck,omitempty"`
+	Bets       []int64                `json:"bets"`
+	CurrentBet int64                  `json:"current_bet"`
+	Round      int                    `json:"round"`
+	TurnIndex  int                    `json:"turn_index"`
+	CustomData map[string]interface{} `json:"custom_data,omitempty"`
 }
 
 // Game interface that all casino games must implement
@@ -90,7 +89,7 @@ type Game interface {
 	GetUserID() int64
 	GetBet() int64
 	GetTimeRemaining() time.Duration
-	
+
 	// Game data
 	GetGameData() *GameData
 	SetGameData(data *GameData)
@@ -98,20 +97,20 @@ type Game interface {
 
 // BaseGameImplementation provides common functionality for all games
 type BaseGameImplementation struct {
-	GameID      string                 `json:"game_id"`
-	GameType    string                 `json:"game_type"`
-	UserID      int64                  `json:"user_id"`
-	Username    string                 `json:"username"`
-	Bet         int64                  `json:"bet"`
-	Status      GameStatus             `json:"status"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
-	ExpiresAt   time.Time              `json:"expires_at"`
-	Session     *discordgo.Session     `json:"-"`
+	GameID      string                       `json:"game_id"`
+	GameType    string                       `json:"game_type"`
+	UserID      int64                        `json:"user_id"`
+	Username    string                       `json:"username"`
+	Bet         int64                        `json:"bet"`
+	Status      GameStatus                   `json:"status"`
+	CreatedAt   time.Time                    `json:"created_at"`
+	UpdatedAt   time.Time                    `json:"updated_at"`
+	ExpiresAt   time.Time                    `json:"expires_at"`
+	Session     *discordgo.Session           `json:"-"`
 	Interaction *discordgo.InteractionCreate `json:"-"`
-	Result      *GameResult            `json:"result,omitempty"`
-	Data        *GameData              `json:"data"`
-	mutex       sync.RWMutex           `json:"-"`
+	Result      *GameResult                  `json:"result,omitempty"`
+	Data        *GameData                    `json:"data"`
+	mutex       sync.RWMutex                 `json:"-"`
 }
 
 // NewBaseGameImplementation creates a new base game implementation
@@ -231,7 +230,7 @@ func (b *BaseGameImplementation) ExtendTimeout(duration time.Duration) {
 func (b *BaseGameImplementation) Cleanup() {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
-	
+
 	if b.Status == StatusInProgress {
 		b.Status = StatusCancelled
 	}
@@ -255,7 +254,7 @@ func InitializeGameManager() {
 		games:   make(map[string]Game),
 		cleanup: time.NewTicker(5 * time.Minute), // Cleanup every 5 minutes
 	}
-	
+
 	// Start cleanup routine
 	go GameMgr.cleanupRoutine()
 }
@@ -296,7 +295,7 @@ func (gm *GameManager) RemoveGame(gameID string) {
 func (gm *GameManager) GetUserGame(userID int64, gameType string) (Game, bool) {
 	gm.mutex.RLock()
 	defer gm.mutex.RUnlock()
-	
+
 	for _, game := range gm.games {
 		if game.GetUserID() == userID && game.GetGameType() == gameType && !game.IsFinished() {
 			return game, true
@@ -316,7 +315,7 @@ func (gm *GameManager) GetActiveGamesCount() int {
 func (gm *GameManager) GetActiveGamesForUser(userID int64) []Game {
 	gm.mutex.RLock()
 	defer gm.mutex.RUnlock()
-	
+
 	var userGames []Game
 	for _, game := range gm.games {
 		if game.GetUserID() == userID && !game.IsFinished() {
@@ -337,17 +336,17 @@ func (gm *GameManager) cleanupRoutine() {
 func (gm *GameManager) cleanupExpiredGames() {
 	gm.mutex.Lock()
 	defer gm.mutex.Unlock()
-	
+
 	expiredGames := make([]string, 0)
 	now := time.Now()
-	
+
 	for gameID, game := range gm.games {
 		// Check if game is finished or expired
 		if game.IsFinished() || game.GetTimeRemaining() <= 0 {
 			expiredGames = append(expiredGames, gameID)
 		}
 	}
-	
+
 	// Clean up expired games
 	for _, gameID := range expiredGames {
 		if game, exists := gm.games[gameID]; exists {
@@ -361,7 +360,7 @@ func (gm *GameManager) cleanupExpiredGames() {
 			delete(gm.games, gameID)
 		}
 	}
-	
+
 	if len(expiredGames) > 0 {
 		fmt.Printf("Cleaned up %d expired games", len(expiredGames))
 	}
@@ -375,7 +374,7 @@ func GetUserIDFromInteraction(i *discordgo.InteractionCreate) int64 {
 	} else if i.User != nil {
 		userID = i.User.ID
 	}
-	
+
 	if id, err := parseUserID(userID); err == nil {
 		return id
 	}

@@ -49,7 +49,7 @@ var (
 func NewBaseGame(session *discordgo.Session, interaction *discordgo.InteractionCreate, bet int64, gameType string) *BaseGame {
 	userID := interaction.Member.User.ID
 	userIDInt, _ := parseUserID(userID)
-	
+
 	return &BaseGame{
 		UserID:               userIDInt,
 		Bet:                  bet,
@@ -95,13 +95,13 @@ func (bg *BaseGame) ValidateBet() error {
 	if err != nil {
 		return fmt.Errorf("failed to get user data: %w", err)
 	}
-	
+
 	bg.UserData = user
-	
+
 	if user.Chips < bg.Bet {
 		return fmt.Errorf("insufficient chips: need %d, have %d", bg.Bet, user.Chips)
 	}
-	
+
 	return nil
 }
 
@@ -109,72 +109,72 @@ func (bg *BaseGame) ValidateBet() error {
 func (bg *BaseGame) EndGame(profit int64) (*User, error) {
 	bg.mu.Lock()
 	defer bg.mu.Unlock()
-	
+
 	if bg.IsGameOverFlag {
 		return bg.UserData, nil
 	}
 	bg.IsGameOverFlag = true
-	
+
 	// Calculate XP gain
 	var xpGain int64 = 0
 	if profit > 0 {
 		xpGain = profit * XPPerProfit
 	}
-	
+
 	// Determine if this game should count towards wins/losses
 	shouldCountWL := true
 	if bg.CountWinLossMinRatio > 0.0 && bg.UserData != nil {
 		requiredBet := int64(math.Ceil(float64(bg.UserData.Chips) * bg.CountWinLossMinRatio))
 		shouldCountWL = bg.Bet >= requiredBet
 	}
-	
+
 	// Prepare update data
 	updates := UserUpdateData{
 		ChipsIncrement:     profit,
 		TotalXPIncrement:   xpGain,
 		CurrentXPIncrement: xpGain,
 	}
-	
+
 	if profit > 0 && shouldCountWL {
 		updates.WinsIncrement = 1
 	} else if profit < 0 && shouldCountWL {
 		updates.LossesIncrement = 1
 	}
-	
+
 	// Update user in database and cache
 	updatedUser, err := UpdateCachedUser(bg.UserID, updates)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
-	
+
 	bg.UserData = updatedUser
-	
+
 	// Check achievements with debouncing
 	go bg.checkAchievements(profit, updatedUser)
-	
+
 	return updatedUser, nil
 }
 
 // checkAchievements checks and awards achievements for the user (with debouncing)
 func (bg *BaseGame) checkAchievements(profit int64, user *User) {
 	currentTime := time.Now()
-	
+
 	// Periodic cleanup of achievement check cache
 	achievementMutex.Lock()
 	if currentTime.Sub(lastCleanup) > cleanupInterval {
 		bg.cleanupAchievementCache(currentTime)
 		lastCleanup = currentTime
 	}
-	
+
 	lastCheck, exists := lastAchievementCheck[bg.UserID]
 	if exists && currentTime.Sub(lastCheck) < achievementDebounceTime {
 		achievementMutex.Unlock()
 		return // Too soon since last check
 	}
-	
+
 	lastAchievementCheck[bg.UserID] = currentTime
 	achievementMutex.Unlock()
-	
+
 	// Check for new achievements
 	if AchievementMgr != nil {
 		newAchievements, err := AchievementMgr.CheckUserAchievements(user)
@@ -182,7 +182,7 @@ func (bg *BaseGame) checkAchievements(profit int64, user *User) {
 			log.Printf("Error checking achievements for user %d: %v", bg.UserID, err)
 			return
 		}
-		
+
 		// Send notification if achievements were earned
 		if len(newAchievements) > 0 {
 			if err := SendAchievementNotification(bg.Session, bg.Interaction, newAchievements); err != nil {
@@ -195,13 +195,13 @@ func (bg *BaseGame) checkAchievements(profit int64, user *User) {
 // cleanupAchievementCache removes old entries from the achievement check cache
 func (bg *BaseGame) cleanupAchievementCache(currentTime time.Time) {
 	cutoffTime := currentTime.Add(-achievementDebounceTime * 2)
-	
+
 	for userID, timestamp := range lastAchievementCheck {
 		if timestamp.Before(cutoffTime) {
 			delete(lastAchievementCheck, userID)
 		}
 	}
-	
+
 	log.Printf("Cleaned up achievement check cache, active entries: %d", len(lastAchievementCheck))
 }
 
@@ -212,7 +212,7 @@ func (bg *BaseGame) RespondWithError(message string) error {
 		Description: message,
 		Color:       0xff0000, // Red
 	}
-	
+
 	response := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
@@ -220,7 +220,7 @@ func (bg *BaseGame) RespondWithError(message string) error {
 			Flags:  discordgo.MessageFlagsEphemeral,
 		},
 	}
-	
+
 	return bg.Session.InteractionRespond(bg.Interaction.Interaction, response)
 }
 
@@ -232,9 +232,9 @@ func (bg *BaseGame) SendFollowup(embed *discordgo.MessageEmbed, ephemeral bool) 
 	if ephemeral {
 		params.Flags = discordgo.MessageFlagsEphemeral
 	}
-	
+
 	_, err := bg.Session.FollowupMessageCreate(bg.Interaction.Interaction, true, params)
-	
+
 	return err
 }
 
@@ -244,7 +244,7 @@ func (bg *BaseGame) UpdateOriginalResponse(embed *discordgo.MessageEmbed, compon
 		Embeds:     &[]*discordgo.MessageEmbed{embed},
 		Components: &components,
 	}
-	
+
 	_, err := bg.Session.InteractionResponseEdit(bg.Interaction.Interaction, edit)
 	return err
 }
@@ -291,10 +291,10 @@ func (gm *GameManager) RemoveGame(gameID string) {
 func (gm *GameManager) CleanupExpiredGames(maxAge time.Duration) {
 	gm.mutex.Lock()
 	defer gm.mutex.Unlock()
-	
+
 	now := time.Now()
 	expiredGames := make([]string, 0)
-	
+
 	for gameID, game := range gm.games {
 		if baseGame, ok := game.(*BaseGame); ok {
 			if now.Sub(baseGame.CreatedAt) > maxAge {
@@ -302,11 +302,11 @@ func (gm *GameManager) CleanupExpiredGames(maxAge time.Duration) {
 			}
 		}
 	}
-	
+
 	for _, gameID := range expiredGames {
 		delete(gm.games, gameID)
 	}
-	
+
 	if len(expiredGames) > 0 {
 		log.Printf("Cleaned up %d expired games", len(expiredGames))
 	}

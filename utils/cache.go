@@ -15,11 +15,11 @@ type CacheEntry struct {
 
 // UserCache manages cached user data
 type UserCache struct {
-	data      map[int64]*CacheEntry
-	mutex     sync.RWMutex
-	ttl       time.Duration
+	data          map[int64]*CacheEntry
+	mutex         sync.RWMutex
+	ttl           time.Duration
 	cleanupTicker *time.Ticker
-	done      chan bool
+	done          chan bool
 }
 
 // Global cache instance
@@ -28,11 +28,11 @@ var Cache *UserCache
 // InitializeCache sets up the user cache system
 func InitializeCache(ttl time.Duration) {
 	Cache = &UserCache{
-		data:      make(map[int64]*CacheEntry),
-		ttl:       ttl,
-		done:      make(chan bool),
+		data: make(map[int64]*CacheEntry),
+		ttl:  ttl,
+		done: make(chan bool),
 	}
-	
+
 	// Start cleanup routine every 2 minutes for better performance
 	Cache.cleanupTicker = time.NewTicker(2 * time.Minute)
 	go Cache.cleanupRoutine()
@@ -51,14 +51,14 @@ func (uc *UserCache) Get(userID int64) (*User, bool) {
 	uc.mutex.RLock()
 	entry, exists := uc.data[userID]
 	uc.mutex.RUnlock()
-	
+
 	if !exists {
 		return nil, false
 	}
-	
+
 	entry.Mutex.RLock()
 	defer entry.Mutex.RUnlock()
-	
+
 	// Check if entry has expired
 	if time.Now().After(entry.ExpiresAt) {
 		// Remove expired entry
@@ -67,7 +67,7 @@ func (uc *UserCache) Get(userID int64) (*User, bool) {
 		uc.mutex.Unlock()
 		return nil, false
 	}
-	
+
 	// Return a copy to prevent external modifications
 	userCopy := *entry.User
 	return &userCopy, true
@@ -77,12 +77,12 @@ func (uc *UserCache) Get(userID int64) (*User, bool) {
 func (uc *UserCache) Set(userID int64, user *User) {
 	// Create a copy to prevent external modifications
 	userCopy := *user
-	
+
 	entry := &CacheEntry{
 		User:      &userCopy,
 		ExpiresAt: time.Now().Add(uc.ttl),
 	}
-	
+
 	uc.mutex.Lock()
 	uc.data[userID] = entry
 	uc.mutex.Unlock()
@@ -93,16 +93,16 @@ func (uc *UserCache) Update(userID int64, user *User) {
 	uc.mutex.RLock()
 	entry, exists := uc.data[userID]
 	uc.mutex.RUnlock()
-	
+
 	if !exists {
 		// If not in cache, just set it
 		uc.Set(userID, user)
 		return
 	}
-	
+
 	entry.Mutex.Lock()
 	defer entry.Mutex.Unlock()
-	
+
 	// Update the user data and extend expiration
 	*entry.User = *user
 	entry.ExpiresAt = time.Now().Add(uc.ttl)
@@ -145,7 +145,7 @@ func (uc *UserCache) cleanupRoutine() {
 func (uc *UserCache) cleanup() {
 	now := time.Now()
 	expiredKeys := make([]int64, 0)
-	
+
 	uc.mutex.RLock()
 	for userID, entry := range uc.data {
 		entry.Mutex.RLock()
@@ -155,38 +155,55 @@ func (uc *UserCache) cleanup() {
 		entry.Mutex.RUnlock()
 	}
 	uc.mutex.RUnlock()
-	
+
 	if len(expiredKeys) > 0 {
 		uc.mutex.Lock()
 		for _, userID := range expiredKeys {
 			delete(uc.data, userID)
 		}
 		uc.mutex.Unlock()
-		
+
 		// Cleanup completed silently for performance
 	}
 }
 
 // GetCachedUser retrieves user data from cache or database
 func GetCachedUser(userID int64) (*User, error) {
+	start := time.Now()
+
 	// Try cache first
 	if Cache != nil {
 		if user, found := Cache.Get(userID); found {
+			// Log only if cache lookup takes unusually long (should be <1ms)
+			if duration := time.Since(start); duration > 5*time.Millisecond {
+				log.Printf("Slow cache hit for user %d: %dms", userID, duration.Milliseconds())
+			}
 			return user, nil
 		}
 	}
-	
+
 	// If not in cache, get from database
+	dbStart := time.Now()
 	user, err := GetUser(userID)
 	if err != nil {
 		return nil, err
 	}
-	
+
+	// Log slow database operations (>100ms is concerning)
+	if duration := time.Since(dbStart); duration > 100*time.Millisecond {
+		log.Printf("Slow database query for user %d: %dms", userID, duration.Milliseconds())
+	}
+
 	// Store in cache if cache is initialized
 	if Cache != nil {
 		Cache.Set(userID, user)
 	}
-	
+
+	// Log total operation time if slow (cache miss + DB query should be <200ms)
+	if totalDuration := time.Since(start); totalDuration > 200*time.Millisecond {
+		log.Printf("Slow GetCachedUser operation for user %d: %dms (cache miss)", userID, totalDuration.Milliseconds())
+	}
+
 	return user, nil
 }
 
@@ -197,12 +214,12 @@ func UpdateCachedUser(userID int64, updates UserUpdateData) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Update cache if cache is initialized
 	if Cache != nil {
 		Cache.Update(userID, user)
 	}
-	
+
 	// Check for new achievements asynchronously for performance
 	if AchievementMgr != nil {
 		go func(u *User, uid int64) {
@@ -214,7 +231,7 @@ func UpdateCachedUser(userID int64, updates UserUpdateData) (*User, error) {
 			}
 		}(user, userID)
 	}
-	
+
 	return user, nil
 }
 
@@ -227,9 +244,9 @@ func InvalidateUserCache(userID int64) {
 
 // CacheStats returns cache statistics
 type CacheStats struct {
-	Size         int           `json:"size"`
-	TTL          time.Duration `json:"ttl"`
-	LastCleanup  time.Time     `json:"last_cleanup"`
+	Size        int           `json:"size"`
+	TTL         time.Duration `json:"ttl"`
+	LastCleanup time.Time     `json:"last_cleanup"`
 }
 
 // GetCacheStats returns current cache statistics
@@ -237,7 +254,7 @@ func GetCacheStats() CacheStats {
 	if Cache == nil {
 		return CacheStats{}
 	}
-	
+
 	return CacheStats{
 		Size: Cache.Size(),
 		TTL:  Cache.ttl,

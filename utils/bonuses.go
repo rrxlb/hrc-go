@@ -42,10 +42,10 @@ type BonusResult struct {
 // Bonus configuration constants
 const (
 	// Base bonus amounts
-	BaseHourlyBonus = 25   // 25 chips per hour (matches Python)
-	BaseDailyBonus  = 150  // 150 chips per day (matches Python)
-	BaseWeeklyBonus = 600  // 600 chips per week (matches Python)
-	BaseVoteBonus   = 250  // 250 chips per vote (matches Python)
+	BaseHourlyBonus = 25  // 25 chips per hour (matches Python)
+	BaseDailyBonus  = 150 // 150 chips per day (matches Python)
+	BaseWeeklyBonus = 600 // 600 chips per week (matches Python)
+	BaseVoteBonus   = 250 // 250 chips per vote (matches Python)
 
 	// Prestige bonus amounts (per prestige level)
 	PrestigeBonusHourly = 50   // 50 chips per prestige level for hourly
@@ -82,7 +82,6 @@ type BonusManager struct{}
 
 // Global bonus manager
 var BonusMgr = &BonusManager{}
-
 
 // CanClaimBonus checks if a user can claim a specific bonus type
 func (bm *BonusManager) CanClaimBonus(user *User, bonusType BonusType) *BonusResult {
@@ -240,7 +239,7 @@ func (bm *BonusManager) calculateBonusAmount(user *User, bonusType BonusType) *B
 
 	// Apply multiplier to the Python formula result
 	actualAmount := int64(float64(pythonAmount) * multiplier)
-	
+
 	// Calculate streak bonus for daily bonuses
 	var streakBonus int64
 	if bonusType == BonusDaily {

@@ -44,7 +44,7 @@ func (c *TopGGClient) CheckUserVote(ctx context.Context, userID string) (bool, e
 	}
 
 	url := fmt.Sprintf("https://top.gg/api/bots/%s/check?userId=%s", c.botID, userID)
-	
+
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return false, fmt.Errorf("failed to create request: %w", err)

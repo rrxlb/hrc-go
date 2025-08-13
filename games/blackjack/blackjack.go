@@ -17,24 +17,74 @@ import (
 var ActiveGames = make(map[string]*BlackjackGame)
 var gamesMutex sync.RWMutex
 
+// Cleanup configuration for game state management
+const (
+	GameTimeoutDuration = 10 * time.Minute // Games timeout after 10 minutes of inactivity
+	CleanupInterval     = 2 * time.Minute  // Run cleanup every 2 minutes
+)
+
+// Initialize cleanup routine - call this from main.go during bot startup
+func init() {
+	go startGameCleanup()
+}
+
+// startGameCleanup runs a background cleanup routine to remove stale games
+func startGameCleanup() {
+	ticker := time.NewTicker(CleanupInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		cleanupExpiredGames()
+	}
+}
+
+// cleanupExpiredGames removes games that have been inactive for too long
+func cleanupExpiredGames() {
+	gamesMutex.Lock()
+	defer gamesMutex.Unlock()
+
+	now := time.Now()
+	expiredCount := 0
+
+	for gameID, game := range ActiveGames {
+		// Check if game has been inactive for too long
+		if now.Sub(game.CreatedAt) > GameTimeoutDuration {
+			delete(ActiveGames, gameID)
+			expiredCount++
+		}
+	}
+
+	if expiredCount > 0 {
+		log.Printf("Cleaned up %d expired blackjack games", expiredCount)
+	}
+}
+
+// GameState represents the current state of interaction handling
+type GameState int
+
+const (
+	StateInitial   GameState = iota // Game created, no responses sent
+	StateDeferred                   // Interaction deferred, waiting for initial response
+	StateActive                     // Game active with initial response sent
+	StateRevealing                  // Dealer cards being revealed
+	StateFinished                   // Game completed, all responses sent
+)
+
 // BlackjackGame represents a blackjack game instance
 type BlackjackGame struct {
 	*utils.BaseGame
-	GameID                  string
-	Bets                    []int64
-	Deck                    *utils.Deck
-	PlayerHands             []*utils.Hand
-	DealerHand              *utils.Hand
-	CurrentHand             int
-	InsuranceBet            int64
-	Results                 []GameResult
-	NetProfit               int64
-	View                    *utils.BlackjackView
-	OriginalInteraction     *discordgo.InteractionCreate
-	IsRevealing             bool
-	InitialResponseSent     bool
-	InteractionAcknowledged bool
-	ComponentResponseSent   bool
+	GameID              string
+	Bets                []int64
+	Deck                *utils.Deck
+	PlayerHands         []*utils.Hand
+	DealerHand          *utils.Hand
+	CurrentHand         int
+	InsuranceBet        int64
+	Results             []GameResult
+	NetProfit           int64
+	View                *utils.BlackjackView
+	OriginalInteraction *discordgo.InteractionCreate
+	State               GameState // Simplified state management
 	// Fallback editing support when webhook token expires
 	ChannelID string
 	MessageID string
@@ -65,6 +115,7 @@ func NewBlackjackGame(session *discordgo.Session, interaction *discordgo.Interac
 		Results:             make([]GameResult, 0),
 		View:                utils.NewBlackjackView(baseGame.UserID, gameID),
 		OriginalInteraction: interaction,
+		State:               StateInitial, // Start in initial state
 		ChannelID:           interaction.ChannelID,
 	}
 
@@ -87,9 +138,9 @@ func (bg *BlackjackGame) StartGame() error {
 	bg.updateViewOptions()
 
 	if playerValue == 21 {
-		// Player has blackjack, finish the game immediately without sending initial response
-		// finishGame() will handle the response
-		return bg.finishGame()
+		// Player has natural blackjack - finish immediately without revealing dealer's second card
+		// This provides the fastest possible resolution for natural blackjacks
+		return bg.finishNaturalBlackjack()
 	}
 
 	// Check if dealer shows Ace to allow insurance
@@ -98,19 +149,22 @@ func (bg *BlackjackGame) StartGame() error {
 		bg.updateViewOptions() // re-evaluate with insurance available
 	}
 
-	// Send or update initial game state
+	// Send or update initial game state based on current state
 	embed := bg.createGameEmbed(false)
 	components := bg.View.GetComponents()
 
 	var err error
-	if bg.InitialResponseSent {
-		// Interaction likely deferred earlier; update the original response
+	if bg.State == StateDeferred {
+		// Interaction was deferred; update the original response
 		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+		if err == nil {
+			bg.State = StateActive
+		}
 	} else {
 		// No prior response; send initial response now
 		err = utils.SendInteractionResponse(bg.Session, bg.Interaction, embed, components, false)
 		if err == nil {
-			bg.InitialResponseSent = true
+			bg.State = StateActive
 		}
 	}
 
@@ -257,6 +311,57 @@ func (bg *BlackjackGame) standCurrentHand() error {
 	return bg.updateGameState()
 }
 
+// finishNaturalBlackjack handles immediate natural blackjack wins without revealing dealer cards
+func (bg *BlackjackGame) finishNaturalBlackjack() error {
+	// For natural blackjack, we don't reveal the dealer's second card or play dealer hand
+	// Check if dealer also has blackjack by peeking at hole card
+	dealerHasBlackjack := bg.DealerHand.IsBlackjack()
+
+	var result GameResult
+	var totalProfit int64
+
+	if dealerHasBlackjack {
+		// Push - both have blackjack
+		result = GameResult{HandIndex: 0, Result: "Push - Both have Blackjack!", Payout: 1.0}
+		totalProfit = 0 // No loss, no gain
+	} else {
+		// Player wins with natural blackjack
+		result = GameResult{HandIndex: 0, Result: "Natural Blackjack! You win!", Payout: 1.0 + utils.BlackjackPayout}
+		payout := int64(float64(bg.Bets[0]) * result.Payout)
+		totalProfit = payout - bg.Bets[0]
+	}
+
+	bg.Results = []GameResult{result}
+	bg.NetProfit = totalProfit
+
+	// End the base game
+	updatedUser, err := bg.EndGame(totalProfit)
+	if err != nil {
+		return fmt.Errorf("failed to end game: %w", err)
+	}
+
+	// Update the user data
+	bg.UserData = updatedUser
+
+	// Send final game state - use special natural blackjack embed that doesn't reveal dealer second card
+	embed := bg.createNaturalBlackjackEmbed(dealerHasBlackjack)
+	components := bg.View.DisableAllButtons()
+
+	// Send response - this is for natural blackjack so no initial response was sent
+	err = utils.SendInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components, false)
+	if err != nil {
+		log.Printf("Failed to send natural blackjack response: %v", err)
+	}
+
+	// Mark game as finished and clean up
+	bg.State = StateFinished
+	gamesMutex.Lock()
+	delete(ActiveGames, bg.GameID)
+	gamesMutex.Unlock()
+
+	return nil
+}
+
 // finishGame completes the game and calculates results
 func (bg *BlackjackGame) finishGame() error {
 	// Play dealer hand with animation
@@ -303,51 +408,31 @@ func (bg *BlackjackGame) finishGame() error {
 	embed := bg.createGameEmbed(true)
 	components := bg.View.DisableAllButtons()
 
-	// Decide response method based on interaction type and whether initial response was sent
+	// Send final game state based on current state
 	var errUpdate error
 
-	// Skip update if interaction has already been acknowledged/failed
-	if !bg.InteractionAcknowledged {
+	if bg.State != StateFinished {
 		if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-			if !bg.ComponentResponseSent {
-				// First response to component interaction
-				errUpdate = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
-				if errUpdate == nil {
-					bg.ComponentResponseSent = true
-				}
-			} else {
-				// Subsequent updates to component interaction
-				errUpdate = utils.EditOriginalInteraction(bg.Session, bg.Interaction, embed, components)
-			}
-		} else if bg.InitialResponseSent {
-			// Slash command interaction with initial response already sent: update the response
+			// Component interaction - send update
+			errUpdate = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+		} else if bg.State == StateDeferred || bg.State == StateActive {
+			// Update deferred response
 			errUpdate = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
 		} else {
-			// Slash command interaction with no initial response (natural blackjack): send initial response
+			// Initial response needed
 			errUpdate = utils.SendInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components, false)
 		}
 
-		// If update fails, try fallback edit when webhook expired, then mark acknowledged
-		if errUpdate != nil {
-			if bg.isWebhookExpired(errUpdate) {
-				if fErr := bg.fallbackEdit(embed, components); fErr == nil {
-					bg.InteractionAcknowledged = true
-					// Successful fallback; suppress error
-					errUpdate = nil
-				} else {
-					bg.InteractionAcknowledged = true
-					// Suppress to allow cleanup
-					errUpdate = nil
-				}
-			} else {
-				bg.InteractionAcknowledged = true
-				// Suppress to allow cleanup
-				errUpdate = nil
+		// If update fails, try fallback edit
+		if errUpdate != nil && bg.isWebhookExpired(errUpdate) {
+			if fErr := bg.fallbackEdit(embed, components); fErr == nil {
+				errUpdate = nil // Successful fallback
 			}
 		}
 	}
 
-	// Clean up the game
+	// Mark game as finished and clean up
+	bg.State = StateFinished
 	gamesMutex.Lock()
 	delete(ActiveGames, bg.GameID)
 	gamesMutex.Unlock()
@@ -358,11 +443,7 @@ func (bg *BlackjackGame) finishGame() error {
 // playDealerHand plays the dealer's hand according to standard rules with minimal animation
 func (bg *BlackjackGame) playDealerHand() error {
 	// Set revealing state to disable player actions
-	bg.IsRevealing = true
-	defer func() {
-		// Ensure revealing state is always cleared, even if there's a panic
-		bg.IsRevealing = false
-	}()
+	bg.State = StateRevealing
 
 	// Check if any player hands are not busted
 	anyPlayerNotBusted := false
@@ -392,8 +473,8 @@ func (bg *BlackjackGame) playDealerHand() error {
 	}
 
 	// Single update at the end instead of multiple updates during animation
-	// Only attempt to update if there's already a message to edit (component or initial response sent)
-	if bg.Interaction.Type == discordgo.InteractionMessageComponent || bg.InitialResponseSent {
+	// Only attempt to update if we're in an active state
+	if bg.State == StateRevealing || bg.State == StateActive {
 		if err := bg.updateGameStateRevealing(); err != nil {
 			log.Printf("Warning: failed to update game state after dealer play: %v", err)
 		}
@@ -441,7 +522,7 @@ func (bg *BlackjackGame) calculateHandResult(hand *utils.Hand, handIndex int) Ga
 
 // updateViewOptions updates the available actions based on game state
 func (bg *BlackjackGame) updateViewOptions() {
-	if bg.IsGameOver() || bg.CurrentHand >= len(bg.PlayerHands) || bg.IsRevealing {
+	if bg.IsGameOver() || bg.CurrentHand >= len(bg.PlayerHands) || bg.State == StateRevealing || bg.State == StateFinished {
 		bg.View.CanHit = false
 		bg.View.CanStand = false
 		bg.View.CanDouble = false
@@ -481,8 +562,8 @@ func (bg *BlackjackGame) updateViewOptions() {
 
 // updateGameState updates the game state display
 func (bg *BlackjackGame) updateGameState() error {
-	// Skip update if interaction has already been acknowledged/failed
-	if bg.InteractionAcknowledged {
+	// Skip update if game is finished
+	if bg.State == StateFinished {
 		return nil
 	}
 
@@ -491,26 +572,19 @@ func (bg *BlackjackGame) updateGameState() error {
 
 	var err error
 	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-		// Always respond to component interactions to avoid "This interaction failed"
+		// Component interactions need immediate response
 		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
-		if err == nil {
-			bg.ComponentResponseSent = true
-		}
 	} else {
+		// Update the deferred response
 		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
 	}
 
-	// If update fails, mark interaction as acknowledged to prevent further attempts
-	if err != nil {
-		// Attempt fallback edit via channel message if webhook expired
-		if bg.isWebhookExpired(err) {
-			if fErr := bg.fallbackEdit(embed, components); fErr == nil {
-				// Successful fallback; no need to keep trying webhook
-				bg.InteractionAcknowledged = true
-				return nil
-			}
+	// If update fails, try fallback edit via channel message
+	if err != nil && bg.isWebhookExpired(err) {
+		if fErr := bg.fallbackEdit(embed, components); fErr == nil {
+			// Successful fallback
+			err = nil
 		}
-		bg.InteractionAcknowledged = true
 	}
 
 	return err
@@ -518,8 +592,8 @@ func (bg *BlackjackGame) updateGameState() error {
 
 // updateGameStateRevealing updates the game state during dealer card reveals
 func (bg *BlackjackGame) updateGameStateRevealing() error {
-	// Skip update if interaction has already been acknowledged/failed
-	if bg.InteractionAcknowledged {
+	// Skip update if game is finished
+	if bg.State == StateFinished {
 		return nil
 	}
 
@@ -528,30 +602,87 @@ func (bg *BlackjackGame) updateGameStateRevealing() error {
 
 	var err error
 	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-		// Always acknowledge component interaction with an update
+		// Component interactions need immediate response
 		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
-		if err == nil {
-			bg.ComponentResponseSent = true
-		}
 	} else {
+		// Update the deferred response
 		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
 	}
 
-	// If update fails, mark interaction as acknowledged to prevent further attempts
-	if err != nil {
-		// Attempt fallback edit via channel message if webhook expired
-		if bg.isWebhookExpired(err) {
-			if fErr := bg.fallbackEdit(embed, components); fErr == nil {
-				bg.InteractionAcknowledged = true
-				return nil
-			}
-			// Log specific webhook errors for debugging
+	// If update fails, try fallback edit via channel message
+	if err != nil && bg.isWebhookExpired(err) {
+		if fErr := bg.fallbackEdit(embed, components); fErr == nil {
+			// Successful fallback
+			err = nil
+		} else {
+			// Log webhook expiration for debugging
 			log.Printf("Discord webhook expired for blackjack game %s (user %d)", bg.GameID, bg.UserID)
 		}
-		bg.InteractionAcknowledged = true
 	}
 
 	return err
+}
+
+// createNaturalBlackjackEmbed creates a special embed for natural blackjack that doesn't reveal dealer's second card
+func (bg *BlackjackGame) createNaturalBlackjackEmbed(dealerHasBlackjack bool) *discordgo.MessageEmbed {
+	// Build player hand data
+	var playerHandData []utils.HandData
+	hasAces := false
+	hand := bg.PlayerHands[0]
+	cards := make([]string, len(hand.Cards))
+	for i, c := range hand.Cards {
+		cards[i] = c.String()
+		if c.IsAce() {
+			hasAces = true
+		}
+	}
+	playerHandData = append(playerHandData, utils.HandData{Hand: cards, Score: hand.GetValue(), IsActive: false})
+
+	// For natural blackjack, we only show dealer's first card unless dealer also has blackjack
+	var dealerCards []string
+	var dealerValue int
+
+	if dealerHasBlackjack {
+		// Reveal both dealer cards for push scenario
+		for _, c := range bg.DealerHand.Cards {
+			dealerCards = append(dealerCards, c.String())
+		}
+		dealerValue = bg.DealerHand.GetValue()
+	} else {
+		// Only show dealer's first card - second card remains hidden
+		dealerCards = append(dealerCards, bg.DealerHand.Cards[0].String())
+		dealerCards = append(dealerCards, "??")
+		dealerValue = bg.DealerHand.Cards[0].GetValue("blackjack")
+	}
+
+	totalBet := bg.Bets[0]
+
+	// Outcome text for natural blackjack
+	outcomeText := bg.Results[0].Result
+
+	// Compute premium-gated XP for display
+	xpGain := int64(0)
+	if bg.NetProfit > 0 {
+		xpGain = bg.NetProfit * utils.XPPerProfit
+		if bg.BaseGame != nil && bg.BaseGame.UserData != nil && !utils.ShouldShowXPGained(bg.BaseGame.Interaction.Member, bg.BaseGame.UserData) {
+			xpGain = 0
+		}
+	}
+
+	embed := utils.BlackjackGameEmbed(
+		playerHandData,
+		dealerCards,
+		dealerValue,
+		totalBet,
+		true, // gameOver = true for final state
+		outcomeText,
+		bg.UserData.Chips,
+		bg.NetProfit,
+		xpGain,
+		hasAces,
+	)
+
+	return embed
 }
 
 // createGameEmbed creates the Discord embed for the game state
@@ -640,49 +771,43 @@ func (bg *BlackjackGame) createGameEmbed(gameOver bool) *discordgo.MessageEmbed 
 
 // HandleBlackjackCommand handles the /blackjack slash command
 func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// Measure only pre-deferral overhead to keep logs actionable
-	start := time.Now()
-
-	// Defer immediately to acknowledge the interaction quickly
+	// Defer immediately for sub-3ms response time - critical for performance
 	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
 		// If deferral fails, fall back to normal error response path
 		respondWithError(s, i, "Failed to acknowledge command")
 		return
 	}
 
-	ackDuration := time.Since(start)
-	if ackDuration > 100*time.Millisecond {
-		log.Printf("Slow blackjack command ack: %dms", ackDuration.Milliseconds())
-	}
-
-	// Continue heavy work asynchronously so the handler returns fast
+	// All heavy work moved to async goroutine for optimal responsiveness
 	go func(sess *discordgo.Session, inter *discordgo.InteractionCreate) {
+		start := time.Now()
+
 		// Parse bet amount
 		betOption := inter.ApplicationCommandData().Options[0]
 		betStr := betOption.StringValue()
 
 		userID, err := parseUserID(inter.Member.User.ID)
 		if err != nil {
-			respondWithError(sess, inter, "Failed to parse user ID")
+			respondWithDeferredError(sess, inter, "Failed to parse user ID")
 			return
 		}
 
 		// Get user data to validate bet
 		user, err := utils.GetCachedUser(userID)
 		if err != nil {
-			respondWithError(sess, inter, "Failed to get user data")
+			respondWithDeferredError(sess, inter, "Failed to get user data")
 			return
 		}
 
 		// Parse and validate bet
 		bet, err := utils.ParseBet(betStr, user.Chips)
 		if err != nil {
-			respondWithError(sess, inter, "Invalid bet amount: "+err.Error())
+			respondWithDeferredError(sess, inter, "Invalid bet amount: "+err.Error())
 			return
 		}
 
 		if bet <= 0 {
-			respondWithError(sess, inter, "Bet amount must be greater than 0")
+			respondWithDeferredError(sess, inter, "Bet amount must be greater than 0")
 			return
 		}
 
@@ -695,8 +820,8 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 		// Create and start new game (user data already validated)
 		game := NewBlackjackGame(sess, inter, bet)
 		game.UserData = user
-		// Mark that the original interaction was deferred so StartGame updates it
-		game.InitialResponseSent = true
+		// Mark that the interaction was deferred
+		game.State = StateDeferred
 
 		// Store game in active games
 		gamesMutex.Lock()
@@ -706,13 +831,19 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 		// Start the game
 		if err := game.StartGame(); err != nil {
 			log.Printf("Failed to start blackjack game: %v", err)
-			respondWithError(sess, inter, "Failed to start game")
+			respondWithDeferredError(sess, inter, "Failed to start game")
 
 			// Clean up failed game
 			gamesMutex.Lock()
 			delete(ActiveGames, game.GameID)
 			gamesMutex.Unlock()
 			return
+		}
+
+		// Log performance for slow operations (>500ms is concerning for async work)
+		duration := time.Since(start)
+		if duration > 500*time.Millisecond {
+			log.Printf("Slow blackjack game initialization: %dms (user: %d)", duration.Milliseconds(), userID)
 		}
 	}(s, i)
 }
@@ -819,6 +950,17 @@ func respondWithError(s *discordgo.Session, i *discordgo.InteractionCreate, mess
 	)
 
 	utils.SendInteractionResponse(s, i, embed, nil, true)
+}
+
+// respondWithDeferredError sends an error response for already-deferred interactions
+func respondWithDeferredError(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
+	embed := utils.CreateBrandedEmbed(
+		"❌ Error",
+		message,
+		0xFF0000, // Red
+	)
+
+	utils.UpdateInteractionResponse(s, i, embed, nil)
 }
 
 // RegisterBlackjackCommands returns the slash command definition for blackjack

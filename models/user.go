@@ -6,29 +6,29 @@ import (
 
 // User represents a Discord user in the casino bot system
 type User struct {
-	UserID        int64           `json:"user_id"`
-	Username      string          `json:"username"`
-	Chips         int64           `json:"chips"`
-	Wins          int             `json:"wins"`
-	Losses        int             `json:"losses"`
-	TotalXP       int64           `json:"total_xp"`
-	CurrentXP     int64           `json:"current_xp"`
-	PrestigeLevel int             `json:"prestige_level"`
+	UserID        int64                  `json:"user_id"`
+	Username      string                 `json:"username"`
+	Chips         int64                  `json:"chips"`
+	Wins          int                    `json:"wins"`
+	Losses        int                    `json:"losses"`
+	TotalXP       int64                  `json:"total_xp"`
+	CurrentXP     int64                  `json:"current_xp"`
+	PrestigeLevel int                    `json:"prestige_level"`
 	PremiumData   map[string]interface{} `json:"premium_data"`
-	LastDaily     *time.Time      `json:"last_daily"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	LastDaily     *time.Time             `json:"last_daily"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
 // UserUpdateData represents the data that can be updated for a user
 type UserUpdateData struct {
-	Username           string `json:"username,omitempty"`
-	ChipsIncrement     int64  `json:"chips_increment,omitempty"`
-	WinsIncrement      int    `json:"wins_increment,omitempty"`
-	LossesIncrement    int    `json:"losses_increment,omitempty"`
-	TotalXPIncrement   int64  `json:"total_xp_increment,omitempty"`
-	CurrentXPIncrement int64  `json:"current_xp_increment,omitempty"`
-	PrestigeLevel      int    `json:"prestige_level,omitempty"`
+	Username           string     `json:"username,omitempty"`
+	ChipsIncrement     int64      `json:"chips_increment,omitempty"`
+	WinsIncrement      int        `json:"wins_increment,omitempty"`
+	LossesIncrement    int        `json:"losses_increment,omitempty"`
+	TotalXPIncrement   int64      `json:"total_xp_increment,omitempty"`
+	CurrentXPIncrement int64      `json:"current_xp_increment,omitempty"`
+	PrestigeLevel      int        `json:"prestige_level,omitempty"`
 	LastDaily          *time.Time `json:"last_daily,omitempty"`
 }
 
@@ -52,16 +52,16 @@ func (u *User) GetRank() Rank {
 		6: {"Legend", "🌟", 2000000, 0xf1c40f},
 		7: {"Casino Elite", "💎", 4500000, 0x1abc9c},
 	}
-	
+
 	currentRank := ranks[0] // Default to first rank
-	
+
 	for level := len(ranks) - 1; level >= 0; level-- {
 		rank, exists := ranks[level]
 		if exists && u.TotalXP >= int64(rank.XPRequired) {
 			return rank
 		}
 	}
-	
+
 	return currentRank
 }
 
@@ -77,7 +77,7 @@ func (u *User) GetRankLevel() int {
 		6: {"Legend", "🌟", 2000000, 0xf1c40f},
 		7: {"Casino Elite", "💎", 4500000, 0x1abc9c},
 	}
-	
+
 	for level := len(ranks) - 1; level >= 0; level-- {
 		rank, exists := ranks[level]
 		if exists && u.TotalXP >= int64(rank.XPRequired) {
@@ -99,14 +99,14 @@ func (u *User) GetNextRank() *Rank {
 		6: {"Legend", "🌟", 2000000, 0xf1c40f},
 		7: {"Casino Elite", "💎", 4500000, 0x1abc9c},
 	}
-	
+
 	currentLevel := u.GetRankLevel()
 	nextLevel := currentLevel + 1
-	
+
 	if nextRank, exists := ranks[nextLevel]; exists {
 		return &nextRank
 	}
-	
+
 	return nil // Already at max rank
 }
 
@@ -116,7 +116,7 @@ func (u *User) GetXPToNextRank() int64 {
 	if nextRank == nil {
 		return 0 // Already at max rank
 	}
-	
+
 	return int64(nextRank.XPRequired) - u.TotalXP
 }
 
@@ -125,12 +125,12 @@ func (u *User) HasPremium() bool {
 	if u.PremiumData == nil {
 		return false
 	}
-	
+
 	premium, exists := u.PremiumData["active"]
 	if !exists {
 		return false
 	}
-	
+
 	active, ok := premium.(bool)
 	return ok && active
 }
@@ -141,7 +141,7 @@ func (u *User) GetWinRate() float64 {
 	if totalGames == 0 {
 		return 0.0
 	}
-	
+
 	return (float64(u.Wins) / float64(totalGames)) * 100
 }
 
@@ -166,7 +166,7 @@ func (u *User) CanClaimDaily() bool {
 	if u.LastDaily == nil {
 		return true
 	}
-	
+
 	// Check if it's been at least 24 hours since last daily claim
 	return time.Since(*u.LastDaily) >= 24*time.Hour
 }
@@ -176,7 +176,7 @@ func (u *User) GetTimeUntilNextDaily() time.Duration {
 	if u.CanClaimDaily() {
 		return 0
 	}
-	
+
 	nextDaily := u.LastDaily.Add(24 * time.Hour)
 	return time.Until(nextDaily)
 }

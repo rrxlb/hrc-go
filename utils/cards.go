@@ -87,12 +87,12 @@ func (c Card) IsBlack() bool {
 
 // Deck represents a deck of playing cards
 type Deck struct {
-	Cards       []Card `json:"cards"`
-	NumDecks    int    `json:"num_decks"`
-	Game        string `json:"game"`
-	DealtCards  int    `json:"dealt_cards"`
-	TotalCards  int    `json:"total_cards"`
-	rng         *rand.Rand
+	Cards      []Card `json:"cards"`
+	NumDecks   int    `json:"num_decks"`
+	Game       string `json:"game"`
+	DealtCards int    `json:"dealt_cards"`
+	TotalCards int    `json:"total_cards"`
+	rng        *rand.Rand
 }
 
 // NewDeck creates a new deck of cards
@@ -104,17 +104,17 @@ func NewDeck(numDecks int, game string) *Deck {
 		DealtCards: 0,
 		rng:        rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
-	
+
 	deck.buildDeck()
 	deck.shuffle()
-	
+
 	return deck
 }
 
 // buildDeck builds a standard 52-card deck multiplied by numDecks
 func (d *Deck) buildDeck() {
 	d.Cards = make([]Card, 0, 52*d.NumDecks)
-	
+
 	// Create all cards for each deck
 	for deckNum := 0; deckNum < d.NumDecks; deckNum++ {
 		for _, suit := range CardSuits {
@@ -124,7 +124,7 @@ func (d *Deck) buildDeck() {
 			}
 		}
 	}
-	
+
 	d.TotalCards = len(d.Cards)
 	d.DealtCards = 0
 }
@@ -143,10 +143,10 @@ func (d *Deck) Deal() Card {
 		d.buildDeck()
 		d.shuffle()
 	}
-	
+
 	card := d.Cards[d.DealtCards]
 	d.DealtCards++
-	
+
 	return card
 }
 
@@ -168,7 +168,7 @@ func (d *Deck) IsEmpty() bool {
 func (d *Deck) ShouldShuffle() bool {
 	remaining := float64(d.TotalCards - d.DealtCards)
 	total := float64(d.TotalCards)
-	
+
 	return (remaining / total) <= ShuffleThreshold
 }
 
@@ -227,7 +227,7 @@ func (h *Hand) GetValue() int {
 func (h *Hand) getBlackjackValue() int {
 	total := 0
 	aces := 0
-	
+
 	for _, card := range h.Cards {
 		value := card.getBlackjackValue()
 		total += value
@@ -235,13 +235,13 @@ func (h *Hand) getBlackjackValue() int {
 			aces++
 		}
 	}
-	
+
 	// Adjust for Aces (count as 1 instead of 11 if total > 21)
 	for aces > 0 && total > 21 {
 		total -= 10 // Convert an Ace from 11 to 1
 		aces--
 	}
-	
+
 	return total
 }
 
@@ -259,7 +259,7 @@ func (h *Hand) IsBlackjack() bool {
 	if h.Game != "blackjack" || len(h.Cards) != 2 {
 		return false
 	}
-	
+
 	return h.GetValue() == 21
 }
 
@@ -268,7 +268,7 @@ func (h *Hand) IsBust() bool {
 	if h.Game != "blackjack" {
 		return false
 	}
-	
+
 	return h.GetValue() > 21
 }
 
@@ -277,7 +277,7 @@ func (h *Hand) IsFiveCardCharlie() bool {
 	if h.Game != "blackjack" {
 		return false
 	}
-	
+
 	return len(h.Cards) == 5 && !h.IsBust()
 }
 
@@ -296,7 +296,7 @@ func (h *Hand) HasSoftAce() bool {
 	if !h.HasAce() {
 		return false
 	}
-	
+
 	// Calculate value without soft ace conversion
 	hardTotal := 0
 	for _, card := range h.Cards {
@@ -306,9 +306,9 @@ func (h *Hand) HasSoftAce() bool {
 			hardTotal += card.getBlackjackValue()
 		}
 	}
-	
+
 	// If we can use an ace as 11 without busting, we have a soft ace
-	return hardTotal + 10 <= 21
+	return hardTotal+10 <= 21
 }
 
 // CanSplit checks if the hand can be split (two cards of same rank)
@@ -316,15 +316,15 @@ func (h *Hand) CanSplit() bool {
 	if len(h.Cards) != 2 {
 		return false
 	}
-	
+
 	// Check if both cards have the same rank or value
 	card1, card2 := h.Cards[0], h.Cards[1]
-	
+
 	// Allow splitting of any two 10-value cards (10, J, Q, K)
 	if card1.GetValue(h.Game) == 10 && card2.GetValue(h.Game) == 10 {
 		return true
 	}
-	
+
 	// Otherwise, must be same rank
 	return card1.Rank == card2.Rank
 }
@@ -334,13 +334,13 @@ func (h *Hand) Split() (*Hand, *Hand) {
 	if !h.CanSplit() {
 		return nil, nil
 	}
-	
+
 	hand1 := NewHand(h.Game)
 	hand2 := NewHand(h.Game)
-	
+
 	hand1.AddCard(h.Cards[0])
 	hand2.AddCard(h.Cards[1])
-	
+
 	return hand1, hand2
 }
 
@@ -349,12 +349,12 @@ func (h *Hand) String() string {
 	if len(h.Cards) == 0 {
 		return "Empty hand"
 	}
-	
+
 	result := ""
 	for _, card := range h.Cards {
 		result += card.String() + " "
 	}
-	
+
 	return fmt.Sprintf("%s(%d)", result, h.GetValue())
 }
 
@@ -378,7 +378,7 @@ func (h *Hand) GetLastCard() *Card {
 	if len(h.Cards) == 0 {
 		return nil
 	}
-	
+
 	return &h.Cards[len(h.Cards)-1]
 }
 
@@ -387,9 +387,9 @@ func (h *Hand) RemoveLastCard() *Card {
 	if len(h.Cards) == 0 {
 		return nil
 	}
-	
+
 	lastCard := h.Cards[len(h.Cards)-1]
 	h.Cards = h.Cards[:len(h.Cards)-1]
-	
+
 	return &lastCard
 }
