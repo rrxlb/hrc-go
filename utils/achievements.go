@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/jackc/pgx/v5"
 )
 
 // AchievementCategory represents different categories of achievements
@@ -317,6 +319,157 @@ func (am *AchievementManager) CheckUserAchievements(user *User) ([]*Achievement,
 	}
 
 	return newAchievements, nil
+}
+
+// BatchCheckAchievements checks achievements for multiple users efficiently
+func (am *AchievementManager) BatchCheckAchievements(users []*User) (map[int64][]*Achievement, error) {
+	if DB == nil || len(users) == 0 {
+		return nil, nil
+	}
+
+	// Collect user IDs for batch query
+	userIDs := make([]int64, len(users))
+	userMap := make(map[int64]*User)
+	for i, user := range users {
+		userIDs[i] = user.UserID
+		userMap[user.UserID] = user
+	}
+
+	// Batch query for all user achievements
+	earnedAchievementsMap, err := am.GetBatchUserAchievements(userIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make(map[int64][]*Achievement)
+	am.mutex.RLock()
+	defer am.mutex.RUnlock()
+
+	// Process each user
+	for _, user := range users {
+		earnedAchievements := earnedAchievementsMap[user.UserID]
+
+		// Create map for quick lookup
+		earnedMap := make(map[int]bool)
+		for _, ua := range earnedAchievements {
+			earnedMap[ua.AchievementID] = true
+		}
+
+		var newAchievements []*Achievement
+
+		// Check each achievement for this user
+		for _, achievement := range am.achievements {
+			if earnedMap[achievement.ID] {
+				continue // Already earned
+			}
+
+			if am.checker.Check(user, achievement) {
+				newAchievements = append(newAchievements, achievement)
+			}
+		}
+
+		if len(newAchievements) > 0 {
+			results[user.UserID] = newAchievements
+		}
+	}
+
+	// Batch award achievements and apply rewards
+	if len(results) > 0 {
+		if err := am.BatchAwardAchievements(results); err != nil {
+			log.Printf("Failed to batch award achievements: %v", err)
+		}
+	}
+
+	return results, nil
+}
+
+// GetBatchUserAchievements retrieves achievements for multiple users in a single query
+func (am *AchievementManager) GetBatchUserAchievements(userIDs []int64) (map[int64][]*UserAchievement, error) {
+	if DB == nil || len(userIDs) == 0 {
+		return nil, nil
+	}
+
+	ctx := context.Background()
+
+	// Build parameterized query for batch operation
+	placeholders := make([]string, len(userIDs))
+	args := make([]interface{}, len(userIDs))
+	for i, userID := range userIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = userID
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, user_id, achievement_id, earned_at
+		FROM user_achievements 
+		WHERE user_id IN (%s)
+		ORDER BY user_id, earned_at DESC`,
+		strings.Join(placeholders, ","))
+
+	rows, err := DB.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to batch query user achievements: %w", err)
+	}
+	defer rows.Close()
+
+	results := make(map[int64][]*UserAchievement)
+	for rows.Next() {
+		var ua UserAchievement
+		err := rows.Scan(&ua.ID, &ua.UserID, &ua.AchievementID, &ua.EarnedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan user achievement: %w", err)
+		}
+		results[ua.UserID] = append(results[ua.UserID], &ua)
+	}
+
+	return results, nil
+}
+
+// BatchAwardAchievements awards achievements to multiple users efficiently
+func (am *AchievementManager) BatchAwardAchievements(achievementsByUser map[int64][]*Achievement) error {
+	if DB == nil || len(achievementsByUser) == 0 {
+		return nil
+	}
+
+	ctx := context.Background()
+
+	// Use pgx.Batch for efficient bulk operations
+	batch := &pgx.Batch{}
+	rewardBatch := &pgx.Batch{}
+
+	for userID, achievements := range achievementsByUser {
+		for _, achievement := range achievements {
+			// Add achievement award to batch
+			batch.Queue(
+				"INSERT INTO user_achievements (user_id, achievement_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+				userID, achievement.ID)
+
+			// Add reward application to batch if there are rewards
+			if achievement.ChipsReward > 0 || achievement.XPReward > 0 {
+				rewardBatch.Queue(
+					"UPDATE users SET chips = chips + $1, total_xp = total_xp + $2 WHERE user_id = $3",
+					achievement.ChipsReward, achievement.XPReward, userID)
+			}
+		}
+	}
+
+	// Execute achievement awards batch
+	if batch.Len() > 0 {
+		results := DB.SendBatch(ctx, batch)
+		if err := results.Close(); err != nil {
+			return fmt.Errorf("failed to batch award achievements: %w", err)
+		}
+	}
+
+	// Execute rewards batch
+	if rewardBatch.Len() > 0 {
+		rewardResults := DB.SendBatch(ctx, rewardBatch)
+		if err := rewardResults.Close(); err != nil {
+			return fmt.Errorf("failed to batch apply achievement rewards: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // GetUserAchievements retrieves all achievements earned by a user

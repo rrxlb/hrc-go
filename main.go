@@ -28,7 +28,6 @@ import (
 	"hrc-go/utils"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/jackc/pgx/v5"
 )
 
 var session *discordgo.Session
@@ -62,10 +61,13 @@ func main() {
 	defer utils.CloseCache()
 	log.Println("Cache system initialized")
 
+	// Initialize centralized game state management
+	utils.InitializeGameManager()
+	defer utils.CloseGameManager()
+	log.Println("Centralized game manager initialized")
+
 	// Heavy subsystems deferred until after READY to reduce startup latency
 	log.Println("Deferring achievement & jackpot initialization until READY...")
-
-	// (Game manager initialization removed; legacy interface cleanup)
 
 	// Get bot token from environment (common variable names)
 	var token string
@@ -627,18 +629,8 @@ func handleLeaderboardCommand(s *discordgo.Session, i *discordgo.InteractionCrea
 		return
 	}
 
-	var rows pgx.Rows
-	var err error
-	switch sub {
-	case "chips":
-		rows, err = utils.DB.Query(context.Background(), "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10")
-	case "xp":
-		rows, err = utils.DB.Query(context.Background(), "SELECT user_id, total_xp FROM users ORDER BY total_xp DESC, user_id LIMIT 10")
-	case "prestige":
-		rows, err = utils.DB.Query(context.Background(), "SELECT user_id, prestige FROM users ORDER BY prestige DESC, user_id LIMIT 10")
-	default:
-		rows, err = utils.DB.Query(context.Background(), "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10")
-	}
+	// Use optimized prepared statements for leaderboard queries
+	rows, err := utils.GetLeaderboard(sub)
 	if err != nil {
 		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed(title, "Failed to load leaderboard.", 0xE74C3C), nil, false)
 		return

@@ -118,10 +118,44 @@ func (j *JSONB) Scan(value interface{}) error {
 	return nil
 }
 
+// Object pools for performance optimization
+var (
+	userPool = sync.Pool{
+		New: func() interface{} {
+			return &User{
+				PremiumSettings: make(JSONB),
+			}
+		},
+	}
+)
+
+// GetUserFromPool retrieves a user struct from the object pool
+func GetUserFromPool() *User {
+	return userPool.Get().(*User)
+}
+
+// PutUserToPool returns a user struct to the object pool after resetting it
+func PutUserToPool(u *User) {
+	// Reset all fields to zero values
+	*u = User{
+		PremiumSettings: make(JSONB),
+	}
+	userPool.Put(u)
+}
+
 var (
 	DB            *pgxpool.Pool
 	dbInitialized = false
 	dbMutex       sync.RWMutex
+
+	// Prepared statements for performance optimization
+	preparedStmts struct {
+		getUserStmt         string
+		leaderboardChips    string
+		leaderboardXP       string
+		leaderboardPrestige string
+		stmtMutex           sync.RWMutex
+	}
 )
 
 // SetupDatabase initializes the database connection pool
@@ -147,11 +181,11 @@ func SetupDatabase() error {
 		return fmt.Errorf("failed to parse database URL: %w", err)
 	}
 
-	// Optimize connection pool for Discord bot workload
-	config.MaxConns = 10               // Reasonable for bot workload
-	config.MinConns = 2                // Keep minimum connections ready
-	config.MaxConnLifetime = time.Hour // Prevent stale connections
-	config.MaxConnIdleTime = 30 * time.Minute
+	// Optimize connection pool for Discord bot workload on Railway
+	config.MaxConns = 25                      // Utilize 25% of Railway's 100 connection limit
+	config.MinConns = 5                       // Keep more connections ready for bursts
+	config.MaxConnLifetime = 30 * time.Minute // Faster connection recycling
+	config.MaxConnIdleTime = 10 * time.Minute // Reduce idle connections faster
 	config.HealthCheckPeriod = 1 * time.Minute
 
 	// Create optimized connection pool
@@ -186,6 +220,11 @@ func SetupDatabase() error {
 	// Create performance indexes
 	if err := createPerformanceIndexes(); err != nil {
 		log.Printf("Warning: Failed to create performance indexes: %v", err)
+	}
+
+	// Prepare common statements for performance
+	if err := prepareStatements(); err != nil {
+		log.Printf("Warning: Failed to prepare statements: %v", err)
 	}
 
 	return nil
@@ -232,31 +271,67 @@ func GetUser(userID int64) (*User, error) {
 
 	ctx := context.Background()
 
-	query := `
-		SELECT user_id, chips, total_xp, current_xp, prestige, wins, losses, 
-			   daily_bonuses_claimed, votes_count, last_hourly, last_daily, 
-			   last_weekly, last_vote, last_bonus, premium_settings, created_at
-		FROM users WHERE user_id = $1`
+	// Use object pool for better memory management
+	user := GetUserFromPool()
+	var err error
+	defer func() {
+		// Only return to pool if there was an error
+		if err != nil {
+			PutUserToPool(user)
+		}
+	}()
 
-	var user User
-	err := DB.QueryRow(ctx, query, userID).Scan(
-		&user.UserID,
-		&user.Chips,
-		&user.TotalXP,
-		&user.CurrentXP,
-		&user.Prestige,
-		&user.Wins,
-		&user.Losses,
-		&user.DailyBonusesClaimed,
-		&user.VotesCount,
-		&user.LastHourly,
-		&user.LastDaily,
-		&user.LastWeekly,
-		&user.LastVote,
-		&user.LastBonus,
-		&user.PremiumSettings,
-		&user.CreatedAt,
-	)
+	// Use prepared statement if available
+	preparedStmts.stmtMutex.RLock()
+	usePrepared := preparedStmts.getUserStmt != ""
+	preparedStmts.stmtMutex.RUnlock()
+
+	if usePrepared {
+		err = DB.QueryRow(ctx, "get_user", userID).Scan(
+			&user.UserID,
+			&user.Chips,
+			&user.TotalXP,
+			&user.CurrentXP,
+			&user.Prestige,
+			&user.Wins,
+			&user.Losses,
+			&user.DailyBonusesClaimed,
+			&user.VotesCount,
+			&user.LastHourly,
+			&user.LastDaily,
+			&user.LastWeekly,
+			&user.LastVote,
+			&user.LastBonus,
+			&user.PremiumSettings,
+			&user.CreatedAt,
+		)
+	} else {
+		// Fallback to direct query
+		query := `
+			SELECT user_id, chips, total_xp, current_xp, prestige, wins, losses, 
+				   daily_bonuses_claimed, votes_count, last_hourly, last_daily, 
+				   last_weekly, last_vote, last_bonus, premium_settings, created_at
+			FROM users WHERE user_id = $1`
+
+		err = DB.QueryRow(ctx, query, userID).Scan(
+			&user.UserID,
+			&user.Chips,
+			&user.TotalXP,
+			&user.CurrentXP,
+			&user.Prestige,
+			&user.Wins,
+			&user.Losses,
+			&user.DailyBonusesClaimed,
+			&user.VotesCount,
+			&user.LastHourly,
+			&user.LastDaily,
+			&user.LastWeekly,
+			&user.LastVote,
+			&user.LastBonus,
+			&user.PremiumSettings,
+			&user.CreatedAt,
+		)
+	}
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -266,7 +341,7 @@ func GetUser(userID int64) (*User, error) {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 
-	return &user, nil
+	return user, nil
 }
 
 // CreateUser creates a new user in the database
@@ -290,26 +365,34 @@ func CreateUser(userID int64) (*User, error) {
 	ctx := context.Background()
 	now := time.Now()
 
-	user := &User{
-		UserID:              userID,
-		Chips:               StartingChips,
-		TotalXP:             0,
-		CurrentXP:           0,
-		Prestige:            0,
-		Wins:                0,
-		Losses:              0,
-		DailyBonusesClaimed: 0,
-		VotesCount:          0,
-		PremiumSettings:     make(JSONB),
-		CreatedAt:           now,
-	}
+	// Use object pool for better memory management
+	user := GetUserFromPool()
+	var err error
+	defer func() {
+		// Only return to pool if there was an error
+		if err != nil {
+			PutUserToPool(user)
+		}
+	}()
+
+	user.UserID = userID
+	user.Chips = StartingChips
+	user.TotalXP = 0
+	user.CurrentXP = 0
+	user.Prestige = 0
+	user.Wins = 0
+	user.Losses = 0
+	user.DailyBonusesClaimed = 0
+	user.VotesCount = 0
+	user.PremiumSettings = make(JSONB)
+	user.CreatedAt = now
 
 	query := `
 		INSERT INTO users (user_id, chips, total_xp, current_xp, prestige, wins, losses, 
 						  daily_bonuses_claimed, votes_count, premium_settings, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 
-	_, err := DB.Exec(ctx, query,
+	_, err = DB.Exec(ctx, query,
 		user.UserID,
 		user.Chips,
 		user.TotalXP,
@@ -454,8 +537,17 @@ func UpdateUser(userID int64, updates UserUpdateData) (*User, error) {
 				  last_weekly, last_vote, last_bonus, premium_settings, created_at`,
 		strings.Join(setParts, ", "))
 
-	var user User
-	err := DB.QueryRow(ctx, query, args...).Scan(
+	// Use object pool for better memory management
+	user := GetUserFromPool()
+	var err error
+	defer func() {
+		// Only return to pool if there was an error
+		if err != nil {
+			PutUserToPool(user)
+		}
+	}()
+
+	err = DB.QueryRow(ctx, query, args...).Scan(
 		&user.UserID,
 		&user.Chips,
 		&user.TotalXP,
@@ -478,7 +570,7 @@ func UpdateUser(userID int64, updates UserUpdateData) (*User, error) {
 		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
 
-	return &user, nil
+	return user, nil
 }
 
 // Note: Cache functions are now in cache.go to avoid duplicates
@@ -701,13 +793,30 @@ func createPerformanceIndexes() error {
 
 	ctx := context.Background()
 
-	// Indexes for leaderboard queries (chips, total_xp, prestige)
+	// Performance-optimized indexes for common queries
 	indexes := []string{
+		// Leaderboard queries with composite indexes (chips, total_xp, prestige)
 		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_chips_desc ON users(chips DESC, user_id)",
 		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_total_xp_desc ON users(total_xp DESC, user_id)",
 		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_prestige_desc ON users(prestige DESC, user_id)",
-		// Additional indexes for common queries
-		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_wins ON users(wins)",
+
+		// Partial indexes for high-value users (better performance for active users)
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_active_chips ON users(chips DESC, user_id) WHERE chips >= 10000",
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_high_xp ON users(total_xp DESC, user_id) WHERE total_xp >= 50000",
+
+		// Bonus cooldown queries
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_last_hourly ON users(last_hourly) WHERE last_hourly IS NOT NULL",
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_last_daily ON users(last_daily) WHERE last_daily IS NOT NULL",
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_last_weekly ON users(last_weekly) WHERE last_weekly IS NOT NULL",
+
+		// Achievement-related queries
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_wins_losses ON users(wins, losses)",
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_prestige_xp ON users(prestige, total_xp)",
+
+		// JSONB operations (if premium settings are queried)
+		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_premium_gin ON users USING GIN(premium_settings)",
+
+		// Time-based queries
 		"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_created_at ON users(created_at)",
 	}
 
@@ -720,4 +829,93 @@ func createPerformanceIndexes() error {
 
 	log.Println("Performance indexes created/verified successfully")
 	return nil
+}
+
+// prepareStatements prepares commonly used queries for better performance
+func prepareStatements() error {
+	if DB == nil {
+		return fmt.Errorf("database not connected")
+	}
+
+	ctx := context.Background()
+	preparedStmts.stmtMutex.Lock()
+	defer preparedStmts.stmtMutex.Unlock()
+
+	// Get user statement
+	getUserQuery := `
+		SELECT user_id, chips, total_xp, current_xp, prestige, wins, losses, 
+			   daily_bonuses_claimed, votes_count, last_hourly, last_daily, 
+			   last_weekly, last_vote, last_bonus, premium_settings, created_at
+		FROM users WHERE user_id = $1`
+
+	conn, err := DB.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to acquire connection for preparing statements: %w", err)
+	}
+	defer conn.Release()
+
+	_, err = conn.Conn().Prepare(ctx, "get_user", getUserQuery)
+	if err != nil {
+		return fmt.Errorf("failed to prepare get_user statement: %w", err)
+	}
+	preparedStmts.getUserStmt = "get_user"
+
+	// Leaderboard statements
+	leaderboardChipsQuery := "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10"
+	_, err = conn.Conn().Prepare(ctx, "leaderboard_chips", leaderboardChipsQuery)
+	if err != nil {
+		return fmt.Errorf("failed to prepare leaderboard_chips statement: %w", err)
+	}
+	preparedStmts.leaderboardChips = "leaderboard_chips"
+
+	leaderboardXPQuery := "SELECT user_id, total_xp FROM users ORDER BY total_xp DESC, user_id LIMIT 10"
+	_, err = conn.Conn().Prepare(ctx, "leaderboard_xp", leaderboardXPQuery)
+	if err != nil {
+		return fmt.Errorf("failed to prepare leaderboard_xp statement: %w", err)
+	}
+	preparedStmts.leaderboardXP = "leaderboard_xp"
+
+	leaderboardPrestigeQuery := "SELECT user_id, prestige FROM users ORDER BY prestige DESC, user_id LIMIT 10"
+	_, err = conn.Conn().Prepare(ctx, "leaderboard_prestige", leaderboardPrestigeQuery)
+	if err != nil {
+		return fmt.Errorf("failed to prepare leaderboard_prestige statement: %w", err)
+	}
+	preparedStmts.leaderboardPrestige = "leaderboard_prestige"
+
+	log.Println("Prepared statements created successfully")
+	return nil
+}
+
+// GetLeaderboard executes optimized leaderboard query using prepared statements
+func GetLeaderboard(leaderboardType string) (pgx.Rows, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not connected")
+	}
+
+	ctx := context.Background()
+	preparedStmts.stmtMutex.RLock()
+	defer preparedStmts.stmtMutex.RUnlock()
+
+	switch leaderboardType {
+	case "chips":
+		if preparedStmts.leaderboardChips != "" {
+			return DB.Query(ctx, "leaderboard_chips")
+		}
+		return DB.Query(ctx, "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10")
+	case "xp":
+		if preparedStmts.leaderboardXP != "" {
+			return DB.Query(ctx, "leaderboard_xp")
+		}
+		return DB.Query(ctx, "SELECT user_id, total_xp FROM users ORDER BY total_xp DESC, user_id LIMIT 10")
+	case "prestige":
+		if preparedStmts.leaderboardPrestige != "" {
+			return DB.Query(ctx, "leaderboard_prestige")
+		}
+		return DB.Query(ctx, "SELECT user_id, prestige FROM users ORDER BY prestige DESC, user_id LIMIT 10")
+	default:
+		if preparedStmts.leaderboardChips != "" {
+			return DB.Query(ctx, "leaderboard_chips")
+		}
+		return DB.Query(ctx, "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10")
+	}
 }

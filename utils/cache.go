@@ -6,35 +6,42 @@ import (
 	"time"
 )
 
-// CacheEntry represents a cached user data entry
+// CacheEntry represents a cached user data entry with optimization flags
 type CacheEntry struct {
-	User      *User
-	ExpiresAt time.Time
-	Mutex     sync.RWMutex
+	User         *User
+	ExpiresAt    time.Time
+	Hot          bool      // Frequently accessed users
+	AccessCount  int64     // Track access frequency for hot/cold decisions
+	LastAccessed time.Time // Track last access time
+	Mutex        sync.RWMutex
 }
 
-// UserCache manages cached user data
+// UserCache manages cached user data with performance optimizations
 type UserCache struct {
 	data          map[int64]*CacheEntry
 	mutex         sync.RWMutex
-	ttl           time.Duration
+	hotTTL        time.Duration // Short TTL for frequently accessed users
+	coldTTL       time.Duration // Longer TTL for infrequently accessed users
 	cleanupTicker *time.Ticker
 	done          chan bool
+	hotThreshold  int64 // Access count threshold for "hot" classification
 }
 
 // Global cache instance
 var Cache *UserCache
 
-// InitializeCache sets up the user cache system
+// InitializeCache sets up the user cache system with dynamic TTL
 func InitializeCache(ttl time.Duration) {
 	Cache = &UserCache{
-		data: make(map[int64]*CacheEntry),
-		ttl:  ttl,
-		done: make(chan bool),
+		data:         make(map[int64]*CacheEntry),
+		hotTTL:       2 * time.Minute, // Hot users: 2 minute TTL for fresh data
+		coldTTL:      ttl,             // Cold users: original TTL (typically 5 minutes)
+		done:         make(chan bool),
+		hotThreshold: 5, // Consider user "hot" after 5 accesses
 	}
 
-	// Start cleanup routine every 2 minutes for better performance
-	Cache.cleanupTicker = time.NewTicker(2 * time.Minute)
+	// Start cleanup routine every 90 seconds for better performance
+	Cache.cleanupTicker = time.NewTicker(90 * time.Second)
 	go Cache.cleanupRoutine()
 }
 
@@ -46,8 +53,46 @@ func CloseCache() {
 	}
 }
 
-// Get retrieves a user from cache
+// Get retrieves a user from cache with zero-copy optimization for read-only access
 func (uc *UserCache) Get(userID int64) (*User, bool) {
+	uc.mutex.RLock()
+	entry, exists := uc.data[userID]
+	uc.mutex.RUnlock()
+
+	if !exists {
+		return nil, false
+	}
+
+	entry.Mutex.Lock()
+	defer entry.Mutex.Unlock()
+
+	// Check if entry has expired
+	if time.Now().After(entry.ExpiresAt) {
+		// Remove expired entry (defer to avoid deadlock)
+		go func() {
+			uc.mutex.Lock()
+			delete(uc.data, userID)
+			uc.mutex.Unlock()
+		}()
+		return nil, false
+	}
+
+	// Update access tracking for hot/cold classification
+	entry.AccessCount++
+	entry.LastAccessed = time.Now()
+
+	// Update hot status based on access patterns
+	if entry.AccessCount >= uc.hotThreshold {
+		entry.Hot = true
+	}
+
+	// Return direct pointer for read-only access (zero-copy)
+	// Caller must not modify the returned user data
+	return entry.User, true
+}
+
+// GetCopy retrieves a copy of user from cache (for modifications)
+func (uc *UserCache) GetCopy(userID int64) (*User, bool) {
 	uc.mutex.RLock()
 	entry, exists := uc.data[userID]
 	uc.mutex.RUnlock()
@@ -68,19 +113,43 @@ func (uc *UserCache) Get(userID int64) (*User, bool) {
 		return nil, false
 	}
 
-	// Return a copy to prevent external modifications
+	// Return a copy for safe modifications
 	userCopy := *entry.User
 	return &userCopy, true
 }
 
-// Set stores a user in cache
+// Set stores a user in cache with dynamic TTL
 func (uc *UserCache) Set(userID int64, user *User) {
 	// Create a copy to prevent external modifications
 	userCopy := *user
+	now := time.Now()
+
+	// Check if this is an existing entry to preserve hot status
+	uc.mutex.RLock()
+	existingEntry, exists := uc.data[userID]
+	uc.mutex.RUnlock()
+
+	var hot bool
+	var accessCount int64
+	if exists && existingEntry != nil {
+		existingEntry.Mutex.RLock()
+		hot = existingEntry.Hot
+		accessCount = existingEntry.AccessCount
+		existingEntry.Mutex.RUnlock()
+	}
+
+	// Use appropriate TTL based on hot/cold status
+	ttl := uc.coldTTL
+	if hot {
+		ttl = uc.hotTTL
+	}
 
 	entry := &CacheEntry{
-		User:      &userCopy,
-		ExpiresAt: time.Now().Add(uc.ttl),
+		User:         &userCopy,
+		ExpiresAt:    now.Add(ttl),
+		Hot:          hot,
+		AccessCount:  accessCount,
+		LastAccessed: now,
 	}
 
 	uc.mutex.Lock()
@@ -88,7 +157,7 @@ func (uc *UserCache) Set(userID int64, user *User) {
 	uc.mutex.Unlock()
 }
 
-// Update modifies a cached user entry
+// Update modifies a cached user entry with dynamic TTL
 func (uc *UserCache) Update(userID int64, user *User) {
 	uc.mutex.RLock()
 	entry, exists := uc.data[userID]
@@ -103,9 +172,15 @@ func (uc *UserCache) Update(userID int64, user *User) {
 	entry.Mutex.Lock()
 	defer entry.Mutex.Unlock()
 
-	// Update the user data and extend expiration
+	// Update the user data and extend expiration with appropriate TTL
 	*entry.User = *user
-	entry.ExpiresAt = time.Now().Add(uc.ttl)
+
+	ttl := uc.coldTTL
+	if entry.Hot {
+		ttl = uc.hotTTL
+	}
+
+	entry.ExpiresAt = time.Now().Add(ttl)
 }
 
 // Delete removes a user from cache
@@ -167,11 +242,11 @@ func (uc *UserCache) cleanup() {
 	}
 }
 
-// GetCachedUser retrieves user data from cache or database
+// GetCachedUser retrieves user data from cache or database (zero-copy for read-only access)
 func GetCachedUser(userID int64) (*User, error) {
 	start := time.Now()
 
-	// Try cache first
+	// Try cache first with zero-copy optimization
 	if Cache != nil {
 		if user, found := Cache.Get(userID); found {
 			// Log only if cache lookup takes unusually long (should be <1ms)
@@ -245,18 +320,38 @@ func InvalidateUserCache(userID int64) {
 // CacheStats returns cache statistics
 type CacheStats struct {
 	Size        int           `json:"size"`
-	TTL         time.Duration `json:"ttl"`
+	HotTTL      time.Duration `json:"hot_ttl"`
+	ColdTTL     time.Duration `json:"cold_ttl"`
+	HotEntries  int           `json:"hot_entries"`
+	ColdEntries int           `json:"cold_entries"`
 	LastCleanup time.Time     `json:"last_cleanup"`
 }
 
-// GetCacheStats returns current cache statistics
+// GetCacheStats returns current cache statistics with hot/cold breakdown
 func GetCacheStats() CacheStats {
 	if Cache == nil {
 		return CacheStats{}
 	}
 
+	Cache.mutex.RLock()
+	defer Cache.mutex.RUnlock()
+
+	hot, cold := 0, 0
+	for _, entry := range Cache.data {
+		entry.Mutex.RLock()
+		if entry.Hot {
+			hot++
+		} else {
+			cold++
+		}
+		entry.Mutex.RUnlock()
+	}
+
 	return CacheStats{
-		Size: Cache.Size(),
-		TTL:  Cache.ttl,
+		Size:        len(Cache.data),
+		HotTTL:      Cache.hotTTL,
+		ColdTTL:     Cache.coldTTL,
+		HotEntries:  hot,
+		ColdEntries: cold,
 	}
 }
