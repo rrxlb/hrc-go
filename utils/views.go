@@ -1,8 +1,10 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -284,7 +286,13 @@ func PaginationView(prevID, nextID string, currentPage, totalPages int) []discor
 }
 
 // SendInteractionResponse sends an interaction response with embed and components
+// Optimized version with timeout handling
 func SendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, ephemeral bool) error {
+	return SendInteractionResponseWithTimeout(s, i, embed, components, ephemeral, 100*time.Millisecond)
+}
+
+// SendInteractionResponseWithTimeout sends an interaction response with configurable timeout
+func SendInteractionResponseWithTimeout(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, ephemeral bool, timeout time.Duration) error {
 	data := &discordgo.InteractionResponseData{
 		Embeds:     []*discordgo.MessageEmbed{embed},
 		Components: components,
@@ -298,22 +306,184 @@ func SendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreat
 		Data: data,
 	}
 
-	err := s.InteractionRespond(i.Interaction, response)
-	return err
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	resultCh := make(chan error, 1)
+
+	// Execute the API call in a goroutine
+	go func() {
+		err := s.InteractionRespond(i.Interaction, response)
+		select {
+		case resultCh <- err:
+		default:
+		}
+	}()
+
+	// Wait for either success, error, or timeout
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			BotLogf("DISCORD_API", "SendInteractionResponse failed: %v", err)
+		}
+		return err
+	case <-ctx.Done():
+		BotLogf("DISCORD_API", "SendInteractionResponse timed out after %v", timeout)
+		return ctx.Err()
+	}
 }
 
 // UpdateInteractionResponse updates an interaction response with new embed and components
+// Optimized version with timeout, retry logic, and fallback mechanisms
 func UpdateInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
+	return UpdateInteractionResponseWithRetry(s, i, embed, components, 100*time.Millisecond, 2)
+}
+
+// UpdateInteractionResponseWithRetry updates an interaction response with configurable timeout and retry logic
+func UpdateInteractionResponseWithRetry(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, timeout time.Duration, maxRetries int) error {
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff: wait 50ms * 2^(attempt-1)
+			backoff := time.Duration(50*attempt*attempt) * time.Millisecond
+			if backoff > 500*time.Millisecond {
+				backoff = 500 * time.Millisecond // Cap at 500ms
+			}
+			time.Sleep(backoff)
+		}
+
+		err := updateInteractionResponseAttempt(s, i, embed, components, timeout)
+		if err == nil {
+			if attempt > 0 {
+				BotLogf("DISCORD_API", "UpdateInteractionResponse succeeded on attempt %d", attempt+1)
+			}
+			return nil
+		}
+
+		lastErr = err
+
+		// Don't retry on certain errors that won't succeed
+		if isNonRetryableError(err) {
+			break
+		}
+
+		BotLogf("DISCORD_API", "UpdateInteractionResponse attempt %d failed: %v", attempt+1, err)
+	}
+
+	// All retries failed, try fallback methods
+	BotLogf("DISCORD_API", "All retry attempts failed, trying fallbacks")
+	return tryInteractionResponseFallback(s, i, embed, components, lastErr)
+}
+
+// updateInteractionResponseAttempt performs a single attempt to update the interaction response
+func updateInteractionResponseAttempt(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, timeout time.Duration) error {
 	edit := &discordgo.WebhookEdit{
 		Embeds:     &[]*discordgo.MessageEmbed{embed},
 		Components: &components,
 	}
 
-	_, err := s.InteractionResponseEdit(i.Interaction, edit)
-	return err
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// Channel to receive the result
+	resultCh := make(chan error, 1)
+
+	// Execute the API call in a goroutine
+	go func() {
+		_, err := s.InteractionResponseEdit(i.Interaction, edit)
+		select {
+		case resultCh <- err:
+		default:
+			// Context was cancelled, ignore result
+		}
+	}()
+
+	// Wait for either success, error, or timeout
+	select {
+	case err := <-resultCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
-// SendFollowupMessage sends a followup message
+// isNonRetryableError checks if an error should not be retried
+func isNonRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Unknown Webhook") ||
+		strings.Contains(msg, "\"code\": 10015") ||
+		strings.Contains(msg, "Unknown interaction") ||
+		strings.Contains(msg, "400") // Bad request won't get better with retry
+}
+
+// tryInteractionResponseFallback attempts fallback methods when primary interaction response fails
+func tryInteractionResponseFallback(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, originalErr error) error {
+	// Attempt 1: Try followup message if webhook still valid
+	if !isWebhookExpiredError(originalErr) {
+		if err := SendFollowupMessage(s, i, embed, components, false); err == nil {
+			BotLogf("DISCORD_API", "Successfully used followup message as fallback")
+			return nil
+		}
+	}
+
+	// Attempt 2: Try direct channel message if we have channel info
+	if i.ChannelID != "" {
+		if err := sendDirectChannelMessage(s, i.ChannelID, embed, components); err == nil {
+			BotLogf("DISCORD_API", "Successfully used direct channel message as fallback")
+			return nil
+		}
+	}
+
+	// All fallbacks failed, return original error
+	return fmt.Errorf("interaction response failed with all fallbacks: %w", originalErr)
+}
+
+// sendDirectChannelMessage sends a message directly to a channel
+func sendDirectChannelMessage(s *discordgo.Session, channelID string, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
+	message := &discordgo.MessageSend{
+		Embeds:     []*discordgo.MessageEmbed{embed},
+		Components: components,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := s.ChannelMessageSendComplex(channelID, message)
+		select {
+		case resultCh <- err:
+		default:
+		}
+	}()
+
+	select {
+	case err := <-resultCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// isWebhookExpiredError checks if the error indicates an expired webhook
+func isWebhookExpiredError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Unknown Webhook") ||
+		strings.Contains(msg, "\"code\": 10015") ||
+		strings.Contains(msg, "404") ||
+		strings.Contains(msg, "Unknown interaction")
+}
+
+// SendFollowupMessage sends a followup message with timeout handling
 func SendFollowupMessage(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, ephemeral bool) error {
 	params := &discordgo.WebhookParams{
 		Embeds:     []*discordgo.MessageEmbed{embed},
@@ -323,9 +493,28 @@ func SendFollowupMessage(s *discordgo.Session, i *discordgo.InteractionCreate, e
 		params.Flags = discordgo.MessageFlagsEphemeral
 	}
 
-	_, err := s.FollowupMessageCreate(i.Interaction, true, params)
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
-	return err
+	resultCh := make(chan error, 1)
+
+	// Execute the API call in a goroutine
+	go func() {
+		_, err := s.FollowupMessageCreate(i.Interaction, true, params)
+		select {
+		case resultCh <- err:
+		default:
+		}
+	}()
+
+	// Wait for either success, error, or timeout
+	select {
+	case err := <-resultCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // DeferInteractionResponse defers an interaction response
@@ -408,4 +597,69 @@ func TryEphemeralFollowup(s *discordgo.Session, i *discordgo.InteractionCreate, 
 	params := &discordgo.WebhookParams{Content: content, Flags: discordgo.MessageFlagsEphemeral}
 	_, err := s.FollowupMessageCreate(i.Interaction, true, params)
 	return err
+}
+
+// UpdateInteractionResponseAsync updates an interaction response asynchronously (fire-and-forget)
+// This is useful when you don't need to wait for the response and want maximum speed
+func UpdateInteractionResponseAsync(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) {
+	go func() {
+		err := UpdateInteractionResponseWithRetry(s, i, embed, components, 100*time.Millisecond, 1)
+		if err != nil {
+			BotLogf("DISCORD_API", "Async UpdateInteractionResponse failed: %v", err)
+		}
+	}()
+}
+
+// OptimizeEmbedPayload ensures embed payload is minimal and efficiently structured
+func OptimizeEmbedPayload(embed *discordgo.MessageEmbed) *discordgo.MessageEmbed {
+	if embed == nil {
+		return embed
+	}
+
+	// Create optimized copy
+	optimized := &discordgo.MessageEmbed{
+		Title:       strings.TrimSpace(embed.Title),
+		Description: strings.TrimSpace(embed.Description),
+		Color:       embed.Color,
+		Timestamp:   embed.Timestamp,
+	}
+
+	// Only include footer if it has content
+	if embed.Footer != nil && strings.TrimSpace(embed.Footer.Text) != "" {
+		optimized.Footer = &discordgo.MessageEmbedFooter{
+			Text:    strings.TrimSpace(embed.Footer.Text),
+			IconURL: embed.Footer.IconURL,
+		}
+	}
+
+	// Only include thumbnail if URL is present
+	if embed.Thumbnail != nil && embed.Thumbnail.URL != "" {
+		optimized.Thumbnail = embed.Thumbnail
+	}
+
+	// Only include image if URL is present
+	if embed.Image != nil && embed.Image.URL != "" {
+		optimized.Image = embed.Image
+	}
+
+	// Optimize fields - remove empty ones and trim whitespace
+	if len(embed.Fields) > 0 {
+		for _, field := range embed.Fields {
+			if field != nil && strings.TrimSpace(field.Name) != "" && strings.TrimSpace(field.Value) != "" {
+				optimized.Fields = append(optimized.Fields, &discordgo.MessageEmbedField{
+					Name:   strings.TrimSpace(field.Name),
+					Value:  strings.TrimSpace(field.Value),
+					Inline: field.Inline,
+				})
+			}
+		}
+	}
+
+	return optimized
+}
+
+// UpdateInteractionResponseOptimized updates an interaction response with payload optimization
+func UpdateInteractionResponseOptimized(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
+	optimizedEmbed := OptimizeEmbedPayload(embed)
+	return UpdateInteractionResponse(s, i, optimizedEmbed, components)
 }
