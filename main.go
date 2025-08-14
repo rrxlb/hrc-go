@@ -191,6 +191,20 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 }
 
 func registerSlashCommands(s *discordgo.Session) error {
+	log.Println("🔄 Starting slash command registration...")
+	
+	// Check if we should force re-registration (bypass hash check)
+	forceReregister := os.Getenv("FORCE_COMMAND_REREGISTER") == "true"
+	if forceReregister {
+		log.Println("⚠️  Force re-registration enabled via FORCE_COMMAND_REREGISTER=true")
+	}
+	
+	// Verify bot user ID is available
+	if s.State.User == nil {
+		return fmt.Errorf("bot user state not available - commands cannot be registered")
+	}
+	log.Printf("📝 Bot ID: %s", s.State.User.ID)
+	
 	// Base commands (global)
 	globalCommands := []*discordgo.ApplicationCommand{
 		{
@@ -322,23 +336,118 @@ func registerSlashCommands(s *discordgo.Session) error {
 		},
 	}
 
-	// Hash commands to skip unnecessary overwrites
+	log.Printf("📊 Total commands to register: %d", len(globalCommands))
+	
+	// Log command names for verification
+	commandNames := make([]string, len(globalCommands))
+	for i, cmd := range globalCommands {
+		commandNames[i] = cmd.Name
+	}
+	log.Printf("📋 Commands: %s", strings.Join(commandNames, ", "))
+
+	// Hash commands to skip unnecessary overwrites (unless forcing)
 	data, _ := json.Marshal(globalCommands)
 	sha := sha256.Sum256(data)
 	newHash := hex.EncodeToString(sha[:])
 	const hashFile = ".commands.hash"
 	oldHashBytes, _ := os.ReadFile(hashFile)
 	oldHash := strings.TrimSpace(string(oldHashBytes))
-	if oldHash == newHash {
-		return nil
+	
+	if !forceReregister && oldHash == newHash {
+		log.Println("✅ Commands unchanged - skipping registration (use FORCE_COMMAND_REREGISTER=true to override)")
+		return verifyCommandRegistration(s, globalCommands)
 	}
+	
+	if oldHash != newHash {
+		log.Printf("🔄 Command hash changed: %s -> %s", oldHash[:8], newHash[:8])
+	}
+
 	// Global registration only (eliminates duplicate commands)
-	// Register all commands globally (may take up to an hour to propagate)
-	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", globalCommands)
+	log.Println("📡 Registering commands globally (may take up to 1 hour to propagate)...")
+	
+	registeredCommands, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", globalCommands)
 	if err != nil {
 		return fmt.Errorf("global bulk overwrite failed: %w", err)
 	}
-	os.WriteFile(hashFile, []byte(newHash), 0644)
+	
+	log.Printf("✅ Successfully registered %d commands", len(registeredCommands))
+	
+	// Verify registration was successful
+	if len(registeredCommands) != len(globalCommands) {
+		log.Printf("⚠️  Warning: Expected %d commands, but got %d registered", len(globalCommands), len(registeredCommands))
+	}
+	
+	// Log registered command IDs for debugging
+	for _, cmd := range registeredCommands {
+		log.Printf("🆔 Registered: %s (ID: %s)", cmd.Name, cmd.ID)
+	}
+	
+	// Save new hash only after successful registration
+	if err := os.WriteFile(hashFile, []byte(newHash), 0644); err != nil {
+		log.Printf("⚠️  Warning: Could not save command hash: %v", err)
+	}
+	
+	log.Println("✅ Global command registration completed")
+	return nil
+}
+
+// verifyCommandRegistration queries Discord to verify that commands were registered successfully
+func verifyCommandRegistration(s *discordgo.Session, expectedCommands []*discordgo.ApplicationCommand) error {
+	log.Println("🔍 Verifying command registration...")
+	
+	// Query currently registered global commands
+	registeredCommands, err := s.ApplicationCommands(s.State.User.ID, "")
+	if err != nil {
+		log.Printf("⚠️  Warning: Could not verify command registration: %v", err)
+		return nil // Don't fail startup just because we can't verify
+	}
+	
+	log.Printf("📊 Currently registered commands: %d", len(registeredCommands))
+	
+	// Create maps for comparison
+	expectedMap := make(map[string]*discordgo.ApplicationCommand)
+	registeredMap := make(map[string]*discordgo.ApplicationCommand)
+	
+	for _, cmd := range expectedCommands {
+		expectedMap[cmd.Name] = cmd
+	}
+	
+	for _, cmd := range registeredCommands {
+		registeredMap[cmd.Name] = cmd
+		log.Printf("🔍 Found registered: %s (ID: %s)", cmd.Name, cmd.ID)
+	}
+	
+	// Check for missing commands
+	missing := []string{}
+	for name := range expectedMap {
+		if _, exists := registeredMap[name]; !exists {
+			missing = append(missing, name)
+		}
+	}
+	
+	// Check for unexpected commands
+	unexpected := []string{}
+	for name := range registeredMap {
+		if _, exists := expectedMap[name]; !exists {
+			unexpected = append(unexpected, name)
+		}
+	}
+	
+	// Report results
+	if len(missing) > 0 {
+		log.Printf("❌ Missing commands: %s", strings.Join(missing, ", "))
+	}
+	
+	if len(unexpected) > 0 {
+		log.Printf("⚠️  Unexpected commands: %s", strings.Join(unexpected, ", "))
+	}
+	
+	if len(missing) == 0 && len(unexpected) == 0 {
+		log.Println("✅ All commands verified successfully")
+	} else {
+		log.Printf("⚠️  Command verification completed with %d missing, %d unexpected", len(missing), len(unexpected))
+	}
+	
 	return nil
 }
 
