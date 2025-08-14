@@ -397,6 +397,9 @@ func GetOriginalResponseMessage(s *discordgo.Session, i *discordgo.InteractionCr
 
 // BotLogf provides centralized formatted logging for component/game issues
 func BotLogf(area string, format string, args ...interface{}) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+	message := fmt.Sprintf(format, args...)
+	fmt.Printf("[%s] [%s] %s\n", timestamp, area, message)
 }
 
 // TryEphemeralFollowup attempts to send a small ephemeral notice if an update failed.
