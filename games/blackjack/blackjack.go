@@ -364,6 +364,12 @@ func (bg *BlackjackGame) finishNaturalBlackjack() error {
 
 // finishGame completes the game and calculates results
 func (bg *BlackjackGame) finishGame() error {
+	// Immediately respond to the interaction to prevent timeout
+	if err := bg.sendDealerPlayingResponse(); err != nil {
+		log.Printf("Failed to send immediate response, continuing: %v", err)
+		// Continue even if immediate response fails
+	}
+
 	// Play dealer hand with animation
 	if err := bg.playDealerHand(); err != nil {
 		log.Printf("Error during dealer hand animation: %v", err)
@@ -404,30 +410,17 @@ func (bg *BlackjackGame) finishGame() error {
 	// Update the user data
 	bg.UserData = updatedUser
 
-	// Send final game state
+	// Send final game state using fallback edit since interaction was already consumed
 	embed := bg.createGameEmbed(true)
 	components := bg.View.DisableAllButtons()
 
-	// Send final game state based on current state
+	// Use fallback edit for final state since we already responded to the interaction
 	var errUpdate error
-
 	if bg.State != StateFinished {
-		if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-			// Component interaction - send update
-			errUpdate = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
-		} else if bg.State == StateDeferred || bg.State == StateActive {
-			// Update deferred response
-			errUpdate = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
-		} else {
-			// Initial response needed
-			errUpdate = utils.SendInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components, false)
-		}
-
-		// If update fails, try fallback edit via channel message
-		if errUpdate != nil && bg.isWebhookExpired(errUpdate) {
-			if fErr := bg.fallbackEdit(embed, components); fErr == nil {
-				errUpdate = nil // Successful fallback
-			}
+		errUpdate = bg.fallbackEdit(embed, components)
+		if errUpdate != nil {
+			log.Printf("Failed to send final game state for game %s: %v", bg.GameID, errUpdate)
+			// Continue with cleanup even if final update fails
 		}
 	}
 
@@ -512,6 +505,29 @@ func (bg *BlackjackGame) playDealerHand() error {
 	}
 
 	return nil
+}
+
+// sendDealerPlayingResponse immediately responds to the interaction with dealer playing state
+func (bg *BlackjackGame) sendDealerPlayingResponse() error {
+	// Create embed showing dealer is playing
+	embed := bg.createGameEmbed(true)         // Show dealer cards revealed
+	components := bg.View.DisableAllButtons() // Disable all buttons
+
+	var err error
+	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
+		// Component interaction - send immediate update
+		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+	} else {
+		// Update deferred response (shouldn't happen in finishGame, but handle gracefully)
+		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+	}
+
+	// If update fails, try fallback edit
+	if err != nil && bg.isWebhookExpired(err) {
+		return bg.fallbackEdit(embed, components)
+	}
+
+	return err
 }
 
 // updateDealerAnimation updates the display during dealer animation using fallback edit
