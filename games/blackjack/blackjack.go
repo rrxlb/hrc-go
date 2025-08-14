@@ -440,7 +440,7 @@ func (bg *BlackjackGame) finishGame() error {
 	return nil
 }
 
-// playDealerHand plays the dealer's hand according to standard rules with animation
+// playDealerHand plays the dealer's hand according to standard rules with minimal animation
 func (bg *BlackjackGame) playDealerHand() error {
 	// Set revealing state to disable player actions
 	bg.State = StateRevealing
@@ -466,20 +466,14 @@ func (bg *BlackjackGame) playDealerHand() error {
 		// Deal next card
 		bg.DealerHand.AddCard(bg.Deck.Deal())
 		cardCount++
-
-		// Add 0.3ms animation delay and update UI to show revealed card
-		time.Sleep(300 * time.Microsecond)
-		
-		// Update the game state to show the newly revealed dealer card
-		if err := bg.updateGameStateRevealing(); err != nil {
-			log.Printf("Failed to update game state during dealer reveal: %v", err)
-			// Continue even if update fails to prevent game breaking
-		}
 	}
 
 	if cardCount >= maxCards {
 		log.Printf("Warning: dealer hit maximum card limit in blackjack game %s", bg.GameID)
 	}
+
+	// Skip intermediate update - finishGame will send the final state
+	// This prevents double interaction consumption issues
 
 	return nil
 }
