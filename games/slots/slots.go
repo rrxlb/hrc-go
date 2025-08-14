@@ -410,59 +410,134 @@ func (g *Game) buildEmbed(reels string, winnings int64, xpGain int64, final bool
 	return embed
 }
 
+// generateReelStrip creates a realistic reel strip that ends with the final result
+func (g *Game) generateReelStrip(columnIndex int, finalColumn []string, stripLength int) []string {
+	strip := make([]string, stripLength)
+
+	// Fill most of the strip with random symbols
+	for i := 0; i < stripLength-3; i++ {
+		strip[i] = getRandomSymbol(g.Rand)
+	}
+
+	// Place the final result at the end of the strip
+	for i := 0; i < 3; i++ {
+		strip[stripLength-3+i] = finalColumn[i]
+	}
+
+	return strip
+}
+
+// calculateColumnDeceleration returns the delay for a specific column at a given step
+func (g *Game) calculateColumnDeceleration(column, step, totalSteps, lockStep int) time.Duration {
+	baseDelay := 120 * time.Millisecond
+
+	if step < lockStep-3 {
+		// Fast spinning phase
+		return baseDelay
+	} else if step < lockStep {
+		// Deceleration phase - progressively slower
+		decelerationFactor := float64(step-(lockStep-3)) / 3.0
+		delay := baseDelay + time.Duration(float64(baseDelay)*decelerationFactor*2)
+		return delay
+	} else if step == lockStep {
+		// Anticipation pause before final stop
+		return 300 * time.Millisecond
+	}
+
+	// Column is locked
+	return 0
+}
+
 func (g *Game) animateSpin(final [][]string) {
 	g.Phase = phaseSpinning
-	// Extended animation: columns stop one by one.
-	totalSteps := 15
-	col1Lock := 6
-	col2Lock := 11
-	stripLen := 24
+
+	// Enhanced animation parameters
+	totalSteps := 20
+	col1Lock := 8
+	col2Lock := 14
+	col3Lock := 18
+	stripLen := 30
+
+	// Generate realistic reel strips for each column
 	strips := make([][]string, 3)
 	for c := 0; c < 3; c++ {
-		col := make([]string, stripLen)
-		for i := 0; i < stripLen; i++ {
-			col[i] = getRandomSymbol(g.Rand)
-		}
-		strips[c] = col
+		finalColumn := []string{final[0][c], final[1][c], final[2][c]}
+		strips[c] = g.generateReelStrip(c, finalColumn, stripLen)
 	}
-	idx := []int{0, 0, 0}
+
+	// Track position for each column
+	positions := []int{0, 0, 0}
+	columnLocked := []bool{false, false, false}
+	lockSteps := []int{col1Lock, col2Lock, col3Lock}
+
 	makeFrame := func(step int) [][]string {
 		frame := make([][]string, 3)
 		for r := 0; r < 3; r++ {
 			frame[r] = make([]string, 3)
 		}
-		lockCols := 0
-		if step >= col1Lock {
-			lockCols = 1
-		}
-		if step >= col2Lock {
-			lockCols = 2
-		}
-		if step == totalSteps-1 {
-			lockCols = 3
-		}
+
 		for c := 0; c < 3; c++ {
 			var colSyms []string
-			if c < lockCols {
+
+			if columnLocked[c] {
+				// Column is locked, show final result
 				colSyms = []string{final[0][c], final[1][c], final[2][c]}
 			} else {
-				colSyms = []string{strips[c][idx[c]%stripLen], strips[c][(idx[c]+1)%stripLen], strips[c][(idx[c]+2)%stripLen]}
-				idx[c] = (idx[c] + 1) % stripLen
+				// Column is still spinning
+				if step >= lockSteps[c] {
+					// Time to lock this column
+					columnLocked[c] = true
+					colSyms = []string{final[0][c], final[1][c], final[2][c]}
+				} else {
+					// Show current position in the strip
+					pos := positions[c]
+					colSyms = []string{
+						strips[c][pos%stripLen],
+						strips[c][(pos+1)%stripLen],
+						strips[c][(pos+2)%stripLen],
+					}
+				}
 			}
+
 			for r := 0; r < 3; r++ {
 				frame[r][c] = colSyms[r]
 			}
 		}
+
 		return frame
 	}
+
 	for step := 0; step < totalSteps; step++ {
 		frame := makeFrame(step)
 		embed := g.buildEmbed(formatReels(frame), 0, 0, false, 0)
 		embeds := []*discordgo.MessageEmbed{embed}
+
 		if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds}); err != nil {
 		}
-		if step < totalSteps-1 {
-			time.Sleep(180 * time.Millisecond)
+
+		// Calculate delays for each spinning column
+		maxDelay := time.Duration(0)
+		for c := 0; c < 3; c++ {
+			if !columnLocked[c] {
+				delay := g.calculateColumnDeceleration(c, step, totalSteps, lockSteps[c])
+				if delay > maxDelay {
+					maxDelay = delay
+				}
+
+				// Advance position if column is still spinning
+				if step < lockSteps[c]-1 {
+					// Normal advancement
+					positions[c]++
+				} else if step == lockSteps[c]-1 {
+					// Position to show final result on next frame
+					positions[c] = stripLen - 3
+				}
+			}
+		}
+
+		// Use the maximum delay from all spinning columns
+		if step < totalSteps-1 && maxDelay > 0 {
+			time.Sleep(maxDelay)
 		}
 	}
 }
