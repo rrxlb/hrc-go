@@ -103,17 +103,6 @@ func main() {
 		select {}
 	}
 
-	// Optimize HTTP client for Discord API performance
-	session.Client = &http.Client{
-		Timeout: 5 * time.Second, // Conservative timeout for Discord API
-		Transport: &http.Transport{
-			MaxIdleConns:        50,               // Allow more idle connections
-			MaxIdleConnsPerHost: 10,               // More connections per Discord host
-			IdleConnTimeout:     30 * time.Second, // Keep connections alive longer
-			DisableKeepAlives:   false,            // Enable keep-alives for performance
-		},
-	}
-
 	// Set up intents (broader to ensure interactions / ready received)
 	session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildMessageReactions
 	// Optional: uncomment if you later need message content
