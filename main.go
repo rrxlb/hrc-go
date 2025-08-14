@@ -192,18 +192,18 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 
 func registerSlashCommands(s *discordgo.Session) error {
 	log.Println("🔄 Starting slash command registration...")
-	
+
 	// Check if we should force re-registration (bypass hash check)
 	forceReregister := os.Getenv("FORCE_COMMAND_REREGISTER") == "true"
 	if forceReregister {
 		log.Println("⚠️  Force re-registration enabled")
 	}
-	
+
 	// Verify bot user ID is available
 	if s.State.User == nil {
 		return fmt.Errorf("bot user state not available - commands cannot be registered")
 	}
-	
+
 	// Base commands (global)
 	globalCommands := []*discordgo.ApplicationCommand{
 		{
@@ -344,36 +344,36 @@ func registerSlashCommands(s *discordgo.Session) error {
 	const hashFile = ".commands.hash"
 	oldHashBytes, _ := os.ReadFile(hashFile)
 	oldHash := strings.TrimSpace(string(oldHashBytes))
-	
+
 	if !forceReregister && oldHash == newHash {
 		log.Println("✅ Commands unchanged - skipping registration")
 		return verifyCommandRegistration(s, globalCommands)
 	}
-	
+
 	if oldHash != newHash {
 		log.Printf("🔄 Command changes detected: %s -> %s", safeHashTruncate(oldHash), safeHashTruncate(newHash))
 	}
 
 	// Global registration only (eliminates duplicate commands)
 	log.Println("📡 Registering commands globally (may take up to 1 hour to propagate)...")
-	
+
 	registeredCommands, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", globalCommands)
 	if err != nil {
 		return fmt.Errorf("global bulk overwrite failed: %w", err)
 	}
-	
+
 	log.Printf("✅ Successfully registered %d commands", len(registeredCommands))
-	
+
 	// Verify registration was successful
 	if len(registeredCommands) != len(globalCommands) {
 		log.Printf("⚠️  Warning: Expected %d commands, but got %d registered", len(globalCommands), len(registeredCommands))
 	}
-	
+
 	// Save new hash only after successful registration
 	if err := os.WriteFile(hashFile, []byte(newHash), 0644); err != nil {
 		log.Printf("⚠️  Warning: Could not save command hash: %v", err)
 	}
-	
+
 	log.Println("✅ Global command registration completed")
 	return nil
 }
@@ -381,28 +381,28 @@ func registerSlashCommands(s *discordgo.Session) error {
 // verifyCommandRegistration queries Discord to verify that commands were registered successfully
 func verifyCommandRegistration(s *discordgo.Session, expectedCommands []*discordgo.ApplicationCommand) error {
 	log.Println("🔍 Verifying command registration...")
-	
+
 	// Query currently registered global commands
 	registeredCommands, err := s.ApplicationCommands(s.State.User.ID, "")
 	if err != nil {
 		log.Printf("⚠️  Could not verify commands: %v", err)
 		return nil // Don't fail startup just because we can't verify
 	}
-	
+
 	log.Printf("📊 Found %d registered commands", len(registeredCommands))
-	
+
 	// Create maps for comparison
 	expectedMap := make(map[string]*discordgo.ApplicationCommand)
 	registeredMap := make(map[string]*discordgo.ApplicationCommand)
-	
+
 	for _, cmd := range expectedCommands {
 		expectedMap[cmd.Name] = cmd
 	}
-	
+
 	for _, cmd := range registeredCommands {
 		registeredMap[cmd.Name] = cmd
 	}
-	
+
 	// Check for missing commands
 	missing := []string{}
 	for name := range expectedMap {
@@ -410,7 +410,7 @@ func verifyCommandRegistration(s *discordgo.Session, expectedCommands []*discord
 			missing = append(missing, name)
 		}
 	}
-	
+
 	// Check for unexpected commands
 	unexpected := []string{}
 	for name := range registeredMap {
@@ -418,22 +418,22 @@ func verifyCommandRegistration(s *discordgo.Session, expectedCommands []*discord
 			unexpected = append(unexpected, name)
 		}
 	}
-	
+
 	// Report results
 	if len(missing) > 0 {
 		log.Printf("❌ Missing commands: %s", strings.Join(missing, ", "))
 	}
-	
+
 	if len(unexpected) > 0 {
 		log.Printf("⚠️  Unexpected commands: %s", strings.Join(unexpected, ", "))
 	}
-	
+
 	if len(missing) == 0 && len(unexpected) == 0 {
 		log.Println("✅ All commands verified successfully")
 	} else {
 		log.Printf("⚠️  Verification: %d missing, %d unexpected", len(missing), len(unexpected))
 	}
-	
+
 	return nil
 }
 

@@ -49,19 +49,19 @@ const (
 	BaseVoteBonus   = 250 // 250 chips per vote (matches Python)
 	BaseServerBonus = 500 // 500 chips per server bonus
 
-	// Prestige bonus amounts (per prestige level)
-	PrestigeBonusHourly = 50   // 50 chips per prestige level for hourly
-	PrestigeBonusDaily  = 350  // 350 chips per prestige level for daily
-	PrestigeBonusWeekly = 1500 // 1500 chips per prestige level for weekly
-	PrestigeBonusVote   = 625  // 625 chips per prestige level for vote
-	PrestigeBonusServer = 1250 // 1250 chips per prestige level for server
+	// Prestige bonus amounts (per prestige level) - reduced by ~30%
+	PrestigeBonusHourly = 35   // 35 chips per prestige level for hourly (was 50)
+	PrestigeBonusDaily  = 250  // 250 chips per prestige level for daily (was 350)
+	PrestigeBonusWeekly = 1100 // 1100 chips per prestige level for weekly (was 1500)
+	PrestigeBonusVote   = 450  // 450 chips per prestige level for vote (was 625)
+	PrestigeBonusServer = 900  // 900 chips per prestige level for server (was 1250)
 
-	// Level bonus amounts (per level)
-	LevelBonusHourly = 15  // 15 chips per level for hourly
-	LevelBonusDaily  = 75  // 75 chips per level for daily
-	LevelBonusWeekly = 300 // 300 chips per level for weekly
-	LevelBonusVote   = 125 // 125 chips per level for vote
-	LevelBonusServer = 250 // 250 chips per level for server
+	// Level bonus amounts (per level) - reduced by ~30%
+	LevelBonusHourly = 10  // 10 chips per level for hourly (was 15)
+	LevelBonusDaily  = 50  // 50 chips per level for daily (was 75)
+	LevelBonusWeekly = 200 // 200 chips per level for weekly (was 300)
+	LevelBonusVote   = 85  // 85 chips per level for vote (was 125)
+	LevelBonusServer = 175 // 175 chips per level for server (was 250)
 
 	// XP rewards
 	HourlyXP = 50   // 50 XP per hourly
@@ -77,10 +77,10 @@ const (
 	VoteCooldown   = 12 * time.Hour     // 12 hours (top.gg voting cooldown)
 	ServerCooldown = 24 * time.Hour     // 24 hours (daily server bonus)
 
-	// Bonus multipliers
-	MaxRankMultiplier     = 1.5 // 50% bonus for max rank
-	PrestigeMultiplier    = 0.1 // 10% per prestige level
-	MaxPrestigeMultiplier = 2.0 // 200% max bonus from prestige
+	// Bonus multipliers - reduced for better balance
+	MaxRankMultiplier     = 1.3  // 30% bonus for max rank (was 50%)
+	PrestigeMultiplier    = 0.08 // 8% per prestige level (was 10%)
+	MaxPrestigeMultiplier = 1.75 // 175% max bonus from prestige (was 200%)
 )
 
 // Main support server configuration
