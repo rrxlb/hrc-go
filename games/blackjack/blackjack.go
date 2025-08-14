@@ -122,15 +122,10 @@ func NewBlackjackGame(session *discordgo.Session, interaction *discordgo.Interac
 
 // StartGame initializes the game and deals initial cards
 func (bg *BlackjackGame) StartGame() error {
-	startGameStart := time.Now()
-
-	// Performance logging: Card dealing
-	dealingStart := time.Now()
 	bg.PlayerHands[0].AddCard(bg.Deck.Deal())
 	bg.DealerHand.AddCard(bg.Deck.Deal())
 	bg.PlayerHands[0].AddCard(bg.Deck.Deal())
 	bg.DealerHand.AddCard(bg.Deck.Deal())
-	dealingDuration := time.Since(dealingStart)
 
 	// Check for natural blackjack
 	playerValue := bg.PlayerHands[0].GetValue()
@@ -141,14 +136,7 @@ func (bg *BlackjackGame) StartGame() error {
 
 	if playerValue == 21 {
 		// Player has natural blackjack - finish immediately without revealing dealer's second card
-		// This provides the fastest possible resolution for natural blackjacks
-		naturalStart := time.Now()
-		err := bg.finishNaturalBlackjack()
-		naturalDuration := time.Since(naturalStart)
-		totalDuration := time.Since(startGameStart)
-		utils.BotLogf("BLACKJACK_PERF", "Natural blackjack finish for user %d: dealing=%dms, natural=%dms, total=%dms",
-			bg.UserID, dealingDuration.Nanoseconds()/1000000, naturalDuration.Nanoseconds()/1000000, totalDuration.Nanoseconds()/1000000)
-		return err
+		return bg.finishNaturalBlackjack()
 	}
 
 	// Check if dealer shows Ace to allow insurance
@@ -157,20 +145,13 @@ func (bg *BlackjackGame) StartGame() error {
 		bg.updateViewOptions() // re-evaluate with insurance available
 	}
 
-	// Performance logging: Embed creation
-	embedStart := time.Now()
 	embed := bg.createGameEmbed(false)
 	components := bg.View.GetComponents()
-	embedDuration := time.Since(embedStart)
 
-	// Performance logging: Response sending
-	responseStart := time.Now()
-	
 	// Use simple, working response pattern without complex animations
 	var err error
 	if bg.State == StateDeferred {
 		// Interaction was deferred; use direct update with timeout optimization
-		utils.BotLogf("BLACKJACK_PERF", "Using direct UpdateInteractionResponse for user %d", bg.UserID)
 		err = utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 2*time.Second)
 		if err == nil {
 			bg.State = StateActive
@@ -182,12 +163,6 @@ func (bg *BlackjackGame) StartGame() error {
 			bg.State = StateActive
 		}
 	}
-	responseDuration := time.Since(responseStart)
-
-	totalDuration := time.Since(startGameStart)
-	utils.BotLogf("BLACKJACK_PERF", "StartGame breakdown for user %d: dealing=%dms, embed=%dms, response=%dms, total=%dms",
-		bg.UserID, dealingDuration.Nanoseconds()/1000000, embedDuration.Nanoseconds()/1000000,
-		responseDuration.Nanoseconds()/1000000, totalDuration.Nanoseconds()/1000000)
 
 	if err == nil {
 		// Capture original message ID for fallback edits later (non-blocking async)
@@ -908,8 +883,6 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 
 	// All heavy work moved to async goroutine for optimal responsiveness
 	go func(sess *discordgo.Session, inter *discordgo.InteractionCreate) {
-		overallStart := time.Now()
-
 		// Parse bet amount
 		betOption := inter.ApplicationCommandData().Options[0]
 		betStr := betOption.StringValue()
@@ -920,22 +893,14 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 			return
 		}
 
-		// Performance logging: User data retrieval
-		userDataStart := time.Now()
 		user, err := utils.GetCachedUser(userID)
-		userDataDuration := time.Since(userDataStart)
-		utils.BotLogf("BLACKJACK_PERF", "User data retrieval for user %d: %dms", userID, userDataDuration.Nanoseconds()/1000000)
 
 		if err != nil {
 			respondWithDeferredError(sess, inter, "Failed to get user data")
 			return
 		}
 
-		// Performance logging: Bet parsing and validation
-		betParseStart := time.Now()
 		bet, err := utils.ParseBet(betStr, user.Chips)
-		betParseDuration := time.Since(betParseStart)
-		utils.BotLogf("BLACKJACK_PERF", "Bet parsing for user %d, bet='%s': %dms", userID, betStr, betParseDuration.Nanoseconds()/1000000)
 
 		if err != nil {
 			respondWithDeferredError(sess, inter, "Invalid bet amount: "+err.Error())
@@ -953,22 +918,16 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 			return
 		}
 
-		// Performance logging: Game initialization
-		gameInitStart := time.Now()
 		game := NewBlackjackGame(sess, inter, bet)
 		game.UserData = user
 		// Mark that the interaction was deferred
 		game.State = StateDeferred
-		gameInitDuration := time.Since(gameInitStart)
-		utils.BotLogf("BLACKJACK_PERF", "Game initialization for user %d, bet %d: %dms", userID, bet, gameInitDuration.Nanoseconds()/1000000)
 
 		// Store game in active games
 		gamesMutex.Lock()
 		ActiveGames[game.GameID] = game
 		gamesMutex.Unlock()
 
-		// Performance logging: Game start (card dealing and initial setup)
-		gameStartStart := time.Now()
 		if err := game.StartGame(); err != nil {
 			respondWithDeferredError(sess, inter, "Failed to start game")
 
@@ -977,22 +936,6 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 			delete(ActiveGames, game.GameID)
 			gamesMutex.Unlock()
 			return
-		}
-		gameStartDuration := time.Since(gameStartStart)
-		utils.BotLogf("BLACKJACK_PERF", "Game start (dealing + embed) for user %d, bet %d: %dms", userID, bet, gameStartDuration.Nanoseconds()/1000000)
-
-		// Log overall performance and individual operation breakdown
-		overallDuration := time.Since(overallStart)
-		utils.BotLogf("BLACKJACK_PERF", "TOTAL blackjack command for user %d, bet %d: %dms (userdata=%dms, betparse=%dms, init=%dms, start=%dms)",
-			userID, bet, overallDuration.Nanoseconds()/1000000,
-			userDataDuration.Nanoseconds()/1000000,
-			betParseDuration.Nanoseconds()/1000000,
-			gameInitDuration.Nanoseconds()/1000000,
-			gameStartDuration.Nanoseconds()/1000000)
-
-		// Log performance warning for slow operations (>500ms is concerning for async work)
-		if overallDuration > 500*time.Millisecond {
-			utils.BotLogf("BLACKJACK_PERF", "WARNING: Slow blackjack command execution for user %d: %dms total", userID, overallDuration.Nanoseconds()/1000000)
 		}
 	}(s, i)
 }
