@@ -167,14 +167,15 @@ func (bg *BlackjackGame) StartGame() error {
 	responseStart := time.Now()
 	var err error
 	if bg.State == StateDeferred {
-		// Interaction was deferred; update the original response
-		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+		// Interaction was deferred; update the original response with optimized payload
+		err = utils.UpdateInteractionResponseOptimized(bg.Session, bg.OriginalInteraction, embed, components)
 		if err == nil {
 			bg.State = StateActive
 		}
 	} else {
-		// No prior response; send initial response now
-		err = utils.SendInteractionResponse(bg.Session, bg.Interaction, embed, components, false)
+		// No prior response; send initial response now with optimized payload
+		optimizedEmbed := utils.OptimizeEmbedPayload(embed)
+		err = utils.SendInteractionResponse(bg.Session, bg.Interaction, optimizedEmbed, components, false)
 		if err == nil {
 			bg.State = StateActive
 		}
@@ -185,6 +186,15 @@ func (bg *BlackjackGame) StartGame() error {
 	utils.BotLogf("BLACKJACK_PERF", "StartGame breakdown for user %d: dealing=%dms, embed=%dms, response=%dms, total=%dms",
 		bg.UserID, dealingDuration.Nanoseconds()/1000000, embedDuration.Nanoseconds()/1000000,
 		responseDuration.Nanoseconds()/1000000, totalDuration.Nanoseconds()/1000000)
+
+	// Log performance warnings for slow Discord API responses
+	if responseDuration > 200*time.Millisecond {
+		utils.BotLogf("BLACKJACK_PERF", "WARNING: Slow Discord API response for user %d: %dms (target: <100ms)",
+			bg.UserID, responseDuration.Nanoseconds()/1000000)
+	} else if responseDuration > 50*time.Millisecond {
+		utils.BotLogf("BLACKJACK_PERF", "Discord API response for user %d: %dms (acceptable but not optimal)",
+			bg.UserID, responseDuration.Nanoseconds()/1000000)
+	}
 
 	if err == nil {
 		// Capture original message ID for fallback edits later (async to avoid blocking)
@@ -530,7 +540,7 @@ func (bg *BlackjackGame) sendDealerPlayingResponse() error {
 		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
 	} else {
 		// Update deferred response (shouldn't happen in finishGame, but handle gracefully)
-		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+		err = utils.UpdateInteractionResponseOptimized(bg.Session, bg.OriginalInteraction, embed, components)
 	}
 
 	// If update fails, try fallback edit
@@ -685,8 +695,8 @@ func (bg *BlackjackGame) updateGameState() error {
 		// Component interactions need immediate response
 		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
 	} else {
-		// Update the deferred response
-		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+		// Update the deferred response with optimized payload
+		err = utils.UpdateInteractionResponseOptimized(bg.Session, bg.OriginalInteraction, embed, components)
 	}
 
 	// If update fails, try fallback edit via channel message
@@ -715,8 +725,8 @@ func (bg *BlackjackGame) updateGameStateRevealing() error {
 		// Component interactions need immediate response
 		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
 	} else {
-		// Update the deferred response
-		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+		// Update the deferred response with optimized payload
+		err = utils.UpdateInteractionResponseOptimized(bg.Session, bg.OriginalInteraction, embed, components)
 	}
 
 	// If update fails, try fallback edit via channel message
@@ -930,7 +940,7 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 
 		if user.Chips < bet {
 			embed := utils.InsufficientChipsEmbed(bet, user.Chips, "blackjack")
-			utils.UpdateInteractionResponse(sess, inter, embed, nil)
+			utils.UpdateInteractionResponseOptimized(sess, inter, embed, nil)
 			return
 		}
 
@@ -1091,7 +1101,7 @@ func respondWithDeferredError(s *discordgo.Session, i *discordgo.InteractionCrea
 		0xFF0000, // Red
 	)
 
-	utils.UpdateInteractionResponse(s, i, embed, nil)
+	utils.UpdateInteractionResponseOptimized(s, i, embed, nil)
 }
 
 // RegisterBlackjackCommands returns the slash command definition for blackjack
