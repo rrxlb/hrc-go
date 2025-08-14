@@ -196,14 +196,13 @@ func registerSlashCommands(s *discordgo.Session) error {
 	// Check if we should force re-registration (bypass hash check)
 	forceReregister := os.Getenv("FORCE_COMMAND_REREGISTER") == "true"
 	if forceReregister {
-		log.Println("⚠️  Force re-registration enabled via FORCE_COMMAND_REREGISTER=true")
+		log.Println("⚠️  Force re-registration enabled")
 	}
 	
 	// Verify bot user ID is available
 	if s.State.User == nil {
 		return fmt.Errorf("bot user state not available - commands cannot be registered")
 	}
-	log.Printf("📝 Bot ID: %s", s.State.User.ID)
 	
 	// Base commands (global)
 	globalCommands := []*discordgo.ApplicationCommand{
@@ -336,14 +335,7 @@ func registerSlashCommands(s *discordgo.Session) error {
 		},
 	}
 
-	log.Printf("📊 Total commands to register: %d", len(globalCommands))
-	
-	// Log command names for verification
-	commandNames := make([]string, len(globalCommands))
-	for i, cmd := range globalCommands {
-		commandNames[i] = cmd.Name
-	}
-	log.Printf("📋 Commands: %s", strings.Join(commandNames, ", "))
+	log.Printf("📊 Preparing %d commands for registration", len(globalCommands))
 
 	// Hash commands to skip unnecessary overwrites (unless forcing)
 	data, _ := json.Marshal(globalCommands)
@@ -354,12 +346,12 @@ func registerSlashCommands(s *discordgo.Session) error {
 	oldHash := strings.TrimSpace(string(oldHashBytes))
 	
 	if !forceReregister && oldHash == newHash {
-		log.Println("✅ Commands unchanged - skipping registration (use FORCE_COMMAND_REREGISTER=true to override)")
+		log.Println("✅ Commands unchanged - skipping registration")
 		return verifyCommandRegistration(s, globalCommands)
 	}
 	
 	if oldHash != newHash {
-		log.Printf("🔄 Command hash changed: %s -> %s", oldHash[:8], newHash[:8])
+		log.Printf("🔄 Command changes detected: %s -> %s", safeHashTruncate(oldHash), safeHashTruncate(newHash))
 	}
 
 	// Global registration only (eliminates duplicate commands)
@@ -375,11 +367,6 @@ func registerSlashCommands(s *discordgo.Session) error {
 	// Verify registration was successful
 	if len(registeredCommands) != len(globalCommands) {
 		log.Printf("⚠️  Warning: Expected %d commands, but got %d registered", len(globalCommands), len(registeredCommands))
-	}
-	
-	// Log registered command IDs for debugging
-	for _, cmd := range registeredCommands {
-		log.Printf("🆔 Registered: %s (ID: %s)", cmd.Name, cmd.ID)
 	}
 	
 	// Save new hash only after successful registration
@@ -398,11 +385,11 @@ func verifyCommandRegistration(s *discordgo.Session, expectedCommands []*discord
 	// Query currently registered global commands
 	registeredCommands, err := s.ApplicationCommands(s.State.User.ID, "")
 	if err != nil {
-		log.Printf("⚠️  Warning: Could not verify command registration: %v", err)
+		log.Printf("⚠️  Could not verify commands: %v", err)
 		return nil // Don't fail startup just because we can't verify
 	}
 	
-	log.Printf("📊 Currently registered commands: %d", len(registeredCommands))
+	log.Printf("📊 Found %d registered commands", len(registeredCommands))
 	
 	// Create maps for comparison
 	expectedMap := make(map[string]*discordgo.ApplicationCommand)
@@ -414,7 +401,6 @@ func verifyCommandRegistration(s *discordgo.Session, expectedCommands []*discord
 	
 	for _, cmd := range registeredCommands {
 		registeredMap[cmd.Name] = cmd
-		log.Printf("🔍 Found registered: %s (ID: %s)", cmd.Name, cmd.ID)
 	}
 	
 	// Check for missing commands
@@ -445,7 +431,7 @@ func verifyCommandRegistration(s *discordgo.Session, expectedCommands []*discord
 	if len(missing) == 0 && len(unexpected) == 0 {
 		log.Println("✅ All commands verified successfully")
 	} else {
-		log.Printf("⚠️  Command verification completed with %d missing, %d unexpected", len(missing), len(unexpected))
+		log.Printf("⚠️  Verification: %d missing, %d unexpected", len(missing), len(unexpected))
 	}
 	
 	return nil
@@ -1607,4 +1593,15 @@ func sanitizeToken(raw string) string {
 		t = strings.TrimSpace(t[4:])
 	}
 	return t
+}
+
+// safeHashTruncate safely truncates a hash string for logging, handling empty strings
+func safeHashTruncate(hash string) string {
+	if len(hash) < 8 {
+		if hash == "" {
+			return "(none)"
+		}
+		return hash
+	}
+	return hash[:8]
 }
