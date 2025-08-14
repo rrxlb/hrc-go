@@ -671,7 +671,14 @@ func handlePrestigeCommand(s *discordgo.Session, i *discordgo.InteractionCreate)
 func handlePrestigeButtons(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	cid := i.MessageComponentData().CustomID
 	if cid == "prestige_cancel" {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseUpdateMessage, Data: &discordgo.InteractionResponseData{Content: "Prestige canceled.", Components: []discordgo.MessageComponent{}}})
+		embed := utils.CreateBrandedEmbed("🐔 Prestige canceled!", "You chickened out.", 0xE67E22)
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Embeds:     []*discordgo.MessageEmbed{embed},
+				Components: []discordgo.MessageComponent{},
+			},
+		})
 		return
 	}
 	if cid == "prestige_confirm" {
