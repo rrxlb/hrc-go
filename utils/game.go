@@ -141,15 +141,12 @@ func (bg *BaseGame) EndGame(profit int64) (*User, error) {
 	}
 
 	// Update user in database and cache
-	updatedUser, err := UpdateCachedUser(bg.UserID, updates)
+	updatedUser, err := UpdateCachedUserWithNotification(bg.UserID, updates, bg.Session, bg.Interaction)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
 
 	bg.UserData = updatedUser
-
-	// Check achievements with debouncing
-	go bg.checkAchievements(profit, updatedUser)
 
 	return updatedUser, nil
 }

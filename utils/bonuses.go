@@ -125,6 +125,11 @@ func (bm *BonusManager) CanClaimBonus(user *User, bonusType BonusType) *BonusRes
 
 // ClaimBonus processes a bonus claim for a user
 func (bm *BonusManager) ClaimBonus(user *User, bonusType BonusType) (*BonusResult, error) {
+	return bm.ClaimBonusWithNotification(user, bonusType, nil, nil)
+}
+
+// ClaimBonusWithNotification processes a bonus claim for a user and sends achievement notifications if context is provided
+func (bm *BonusManager) ClaimBonusWithNotification(user *User, bonusType BonusType, session *discordgo.Session, interaction *discordgo.InteractionCreate) (*BonusResult, error) {
 	// Check if bonus can be claimed
 	canClaim := bm.CanClaimBonus(user, bonusType)
 	if !canClaim.Success {
@@ -156,7 +161,7 @@ func (bm *BonusManager) ClaimBonus(user *User, bonusType BonusType) (*BonusResul
 	}
 
 	// Apply updates to database and cache
-	_, err := UpdateCachedUser(user.UserID, updates)
+	_, err := UpdateCachedUserWithNotification(user.UserID, updates, session, interaction)
 	if err != nil {
 		return &BonusResult{
 			Success: false,

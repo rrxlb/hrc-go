@@ -263,7 +263,7 @@ func handleReveal(s *discordgo.Session, i *discordgo.InteractionCreate, g *Game,
 		if profit > 0 {
 			xp = profit * utils.XPPerProfit
 		}
-		userAfter, _ := utils.UpdateCachedUser(g.UserID, utils.UserUpdateData{ChipsIncrement: profit, TotalXPIncrement: xp, CurrentXPIncrement: xp})
+		userAfter, _ := utils.UpdateCachedUserWithNotification(g.UserID, utils.UserUpdateData{ChipsIncrement: profit, TotalXPIncrement: xp, CurrentXPIncrement: xp}, s, i)
 		newBal := int64(0)
 		if userAfter != nil {
 			newBal = userAfter.Chips
@@ -309,7 +309,7 @@ func handleCashout(s *discordgo.Session, i *discordgo.InteractionCreate, g *Game
 	if profit > 0 {
 		xp = profit * utils.XPPerProfit
 	}
-	userAfter, _ := utils.UpdateCachedUser(g.UserID, utils.UserUpdateData{ChipsIncrement: profit, TotalXPIncrement: xp, CurrentXPIncrement: xp})
+	userAfter, _ := utils.UpdateCachedUserWithNotification(g.UserID, utils.UserUpdateData{ChipsIncrement: profit, TotalXPIncrement: xp, CurrentXPIncrement: xp}, s, i)
 	newBal := int64(0)
 	if userAfter != nil {
 		newBal = userAfter.Chips

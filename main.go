@@ -675,7 +675,7 @@ func handlePrestigeButtons(s *discordgo.Session, i *discordgo.InteractionCreate)
 			p.ChipsIncrement = utils.StartingChips - u.Chips
 			p.CurrentXPIncrement = -u.CurrentXP
 		}
-		updated, _ := utils.UpdateCachedUser(userID, p)
+		updated, _ := utils.UpdateCachedUserWithNotification(userID, p, s, i)
 		embed := utils.CreateBrandedEmbed("Prestiged!", fmt.Sprintf("You are now Prestige %d. Balance reset to %s %s.", updated.Prestige, utils.FormatChips(updated.Chips), utils.ChipsEmoji), 0xF1C40F)
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseUpdateMessage, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}, Components: []discordgo.MessageComponent{}}})
 		return
@@ -929,7 +929,7 @@ func handleAddChipsCommand(s *discordgo.Session, i *discordgo.InteractionCreate)
 		return
 	}
 	tid, _ := strconv.ParseInt(targetID, 10, 64)
-	updated, err := utils.UpdateCachedUser(tid, utils.UserUpdateData{ChipsIncrement: amount})
+	updated, err := utils.UpdateCachedUserWithNotification(tid, utils.UserUpdateData{ChipsIncrement: amount}, s, i)
 	if err != nil {
 		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", "Failed to update user.", 0xE74C3C), nil, true)
 		return
@@ -962,7 +962,7 @@ func handleBonusCommand(s *discordgo.Session, i *discordgo.InteractionCreate, bo
 	}
 
 	// Attempt to claim bonus
-	result, err := utils.BonusMgr.ClaimBonus(user, bonusType)
+	result, err := utils.BonusMgr.ClaimBonusWithNotification(user, bonusType, s, i)
 	if err != nil {
 		respondWithError(s, i, "❌ An error occurred while claiming bonus.")
 		return
@@ -1128,7 +1128,7 @@ func handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	if hasVoted {
 		// Grant the vote bonus
-		bonusResult, err := utils.BonusMgr.ClaimBonus(user, utils.BonusVote)
+		bonusResult, err := utils.BonusMgr.ClaimBonusWithNotification(user, utils.BonusVote, s, i)
 		if err != nil {
 			respondWithError(s, i, "❌ An error occurred while claiming vote bonus.")
 			return
@@ -1145,19 +1145,6 @@ func handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1754610906/TU_khaw12.png",
 		}
 		utils.SendInteractionResponse(s, i, embed, nil, true)
-
-		// Check for achievements (similar to Python version)
-		go func() {
-			if utils.AchievementMgr != nil {
-				// Get updated user for achievement checking
-				if updatedUser, err := utils.GetUser(userID); err == nil {
-					newlyAwarded, err := utils.AchievementMgr.CheckUserAchievements(updatedUser)
-					if err == nil && len(newlyAwarded) > 0 {
-						// Could send achievement notification here if needed
-					}
-				}
-			}
-		}()
 
 	} else {
 		// Show vote button

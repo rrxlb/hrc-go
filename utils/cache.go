@@ -3,6 +3,8 @@ package utils
 import (
 	"sync"
 	"time"
+
+	"github.com/bwmarrin/discordgo"
 )
 
 // CacheEntry represents a cached user data entry with optimization flags
@@ -266,6 +268,12 @@ func GetCachedUser(userID int64) (*User, error) {
 
 // UpdateCachedUser updates user data in both cache and database
 func UpdateCachedUser(userID int64, updates UserUpdateData) (*User, error) {
+	return UpdateCachedUserWithNotification(userID, updates, nil, nil)
+}
+
+// UpdateCachedUserWithNotification updates user data in both cache and database,
+// and sends achievement notifications if session and interaction are provided
+func UpdateCachedUserWithNotification(userID int64, updates UserUpdateData, session *discordgo.Session, interaction *discordgo.InteractionCreate) (*User, error) {
 	// Update in database first
 	user, err := UpdateUser(userID, updates)
 	if err != nil {
@@ -277,11 +285,20 @@ func UpdateCachedUser(userID int64, updates UserUpdateData) (*User, error) {
 		Cache.Update(userID, user)
 	}
 
-	// Check for new achievements asynchronously for performance
+	// Check for new achievements
 	if AchievementMgr != nil {
-		go func(u *User, uid int64) {
-			AchievementMgr.CheckUserAchievements(u)
-		}(user, userID)
+		if session != nil && interaction != nil {
+			// Synchronous check with notification when context is available
+			newlyAwarded, err := AchievementMgr.CheckUserAchievements(user)
+			if err == nil && len(newlyAwarded) > 0 {
+				SendAchievementNotification(session, interaction, newlyAwarded)
+			}
+		} else {
+			// Asynchronous check without notification when no context
+			go func(u *User, uid int64) {
+				AchievementMgr.CheckUserAchievements(u)
+			}(user, userID)
+		}
 	}
 
 	return user, nil
