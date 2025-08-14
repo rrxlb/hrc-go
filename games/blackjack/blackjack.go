@@ -501,7 +501,7 @@ func (bg *BlackjackGame) playDealerHand() error {
 		cardCount++
 
 		// Update display with new card
-		if err := bg.updateGameStateRevealing(); err != nil {
+		if err := bg.updateDealerAnimation(); err != nil {
 			log.Printf("Failed to update during dealer animation, continuing: %v", err)
 			// Continue even if display update fails
 		}
@@ -514,13 +514,40 @@ func (bg *BlackjackGame) playDealerHand() error {
 	return nil
 }
 
+// updateDealerAnimation updates the display during dealer animation using fallback edit
+func (bg *BlackjackGame) updateDealerAnimation() error {
+	// Skip update if game is finished
+	if bg.State == StateFinished {
+		return nil
+	}
+
+	// Ensure we have message info for fallback edit; try to get it if missing
+	if bg.ChannelID == "" || bg.MessageID == "" {
+		// Try to get from current interaction as final attempt
+		if bg.Interaction != nil && bg.Interaction.Message != nil {
+			bg.ChannelID = bg.Interaction.ChannelID
+			bg.MessageID = bg.Interaction.Message.ID
+		} else {
+			// No message info available, skip animation update gracefully
+			log.Printf("Skipping dealer animation update for game %s: no message info", bg.GameID)
+			return nil
+		}
+	}
+
+	embed := bg.createGameEmbed(true)         // Show as game over to reveal dealer cards
+	components := bg.View.DisableAllButtons() // Disable all buttons during reveal
+
+	// Use fallback edit to avoid interaction consumption issues
+	return bg.fallbackEdit(embed, components)
+}
+
 // revealDealerHoleCard reveals the dealer's hole card with animation
 func (bg *BlackjackGame) revealDealerHoleCard() error {
 	// Add dramatic pause before revealing hole card
 	time.Sleep(1200 * time.Millisecond)
 
-	// Update the game state to show the hole card
-	return bg.updateGameStateRevealing()
+	// Update the game state to show the hole card using fallback edit
+	return bg.updateDealerAnimation()
 }
 
 // playDealerHandInstant plays dealer hand instantly (fallback for animation failures)
