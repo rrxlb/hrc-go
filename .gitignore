@@ -1,0 +1,11 @@
+# Binaries
+hrc-go
+hrc-go.exe
+*.exe
+
+# Command registration cache
+.commands.hash
+
+# Temporary files
+*.tmp
+out/
