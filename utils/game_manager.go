@@ -206,7 +206,6 @@ func (gsm *GameStateManager) cleanupExpiredGames() {
 	// Cleanup completed silently for performance
 	// Only log if significant cleanup occurred
 	if totalCleaned > 10 {
-		log.Printf("Cleaned up %d expired games across %d types", totalCleaned, len(cleanedByType))
 	}
 	_ = cleanedByType // Mark as used for build
 }

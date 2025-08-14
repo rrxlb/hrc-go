@@ -55,7 +55,6 @@ func cleanupExpiredGames() {
 	}
 
 	if expiredCount > 0 {
-		log.Printf("Cleaned up %d expired blackjack games", expiredCount)
 	}
 }
 
@@ -350,7 +349,6 @@ func (bg *BlackjackGame) finishNaturalBlackjack() error {
 	// Send response - this is for natural blackjack so no initial response was sent
 	err = utils.SendInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components, false)
 	if err != nil {
-		log.Printf("Failed to send natural blackjack response: %v", err)
 	}
 
 	// Mark game as finished and clean up
@@ -366,13 +364,11 @@ func (bg *BlackjackGame) finishNaturalBlackjack() error {
 func (bg *BlackjackGame) finishGame() error {
 	// Immediately respond to the interaction to prevent timeout
 	if err := bg.sendDealerPlayingResponse(); err != nil {
-		log.Printf("Failed to send immediate response, continuing: %v", err)
 		// Continue even if immediate response fails
 	}
 
 	// Play dealer hand with animation
 	if err := bg.playDealerHand(); err != nil {
-		log.Printf("Error during dealer hand animation: %v", err)
 		// Continue with game completion even if animation fails
 	}
 
@@ -419,7 +415,6 @@ func (bg *BlackjackGame) finishGame() error {
 	if bg.State != StateFinished {
 		errUpdate = bg.fallbackEdit(embed, components)
 		if errUpdate != nil {
-			log.Printf("Failed to send final game state for game %s: %v", bg.GameID, errUpdate)
 			// Continue with cleanup even if final update fails
 		}
 	}
@@ -471,7 +466,6 @@ func (bg *BlackjackGame) playDealerHand() error {
 
 	// Start with hole card reveal animation
 	if err := bg.revealDealerHoleCard(); err != nil {
-		log.Printf("Failed to animate hole card reveal, falling back to instant: %v", err)
 		// Continue with instant dealer play as fallback
 		return bg.playDealerHandInstant()
 	}
@@ -495,13 +489,11 @@ func (bg *BlackjackGame) playDealerHand() error {
 
 		// Update display with new card
 		if err := bg.updateDealerAnimation(); err != nil {
-			log.Printf("Failed to update during dealer animation, continuing: %v", err)
 			// Continue even if display update fails
 		}
 	}
 
 	if cardCount >= maxCards {
-		log.Printf("Warning: dealer hit maximum card limit in blackjack game %s", bg.GameID)
 	}
 
 	return nil
@@ -545,7 +537,6 @@ func (bg *BlackjackGame) updateDealerAnimation() error {
 			bg.MessageID = bg.Interaction.Message.ID
 		} else {
 			// No message info available, skip animation update gracefully
-			log.Printf("Skipping dealer animation update for game %s: no message info", bg.GameID)
 			return nil
 		}
 	}
@@ -578,7 +569,6 @@ func (bg *BlackjackGame) playDealerHandInstant() error {
 	}
 
 	if cardCount >= maxCards {
-		log.Printf("Warning: dealer hit maximum card limit in blackjack game %s", bg.GameID)
 	}
 
 	return nil
@@ -717,7 +707,6 @@ func (bg *BlackjackGame) updateGameStateRevealing() error {
 			err = nil
 		} else {
 			// Log webhook expiration for debugging
-			log.Printf("Discord webhook expired for blackjack game %s (user %d)", bg.GameID, bg.UserID)
 		}
 	}
 
@@ -931,7 +920,6 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 
 		// Start the game
 		if err := game.StartGame(); err != nil {
-			log.Printf("Failed to start blackjack game: %v", err)
 			respondWithDeferredError(sess, inter, "Failed to start game")
 
 			// Clean up failed game
@@ -944,7 +932,6 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 		// Log performance for slow operations (>500ms is concerning for async work)
 		duration := time.Since(start)
 		if duration > 500*time.Millisecond {
-			log.Printf("Slow blackjack game initialization: %dms (user: %d)", duration.Milliseconds(), userID)
 		}
 	}(s, i)
 }
@@ -1001,7 +988,6 @@ func HandleBlackjackInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 	}
 
 	if actionErr != nil {
-		log.Printf("Blackjack action error: %v", actionErr)
 		// Don't send error response if the action might have already responded
 		// The action methods handle their own responses
 		return

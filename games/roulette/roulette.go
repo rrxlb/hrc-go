@@ -39,7 +39,6 @@ func HandleRouletteCommand(s *discordgo.Session, i *discordgo.InteractionCreate)
 	activeRouletteGames[userID] = game
 	embed := utils.RouletteGameEmbed("betting", game.Bets, 0, "", 0, 0, 0)
 	if err := utils.SendInteractionResponse(s, i, embed, game.buildComponents(), false); err != nil {
-		log.Printf("roulette: failed initial InteractionRespond for user %d: %v", userID, err)
 		// Clean up so user can retry
 		delete(activeRouletteGames, userID)
 		// Attempt a simple ephemeral fallback if interaction still valid

@@ -139,7 +139,6 @@ func (am *AchievementManager) LoadAchievements() error {
 		am.achievements[achievement.ID] = &achievement
 	}
 
-	log.Printf("Loaded %d achievements", len(am.achievements))
 	return nil
 }
 
@@ -226,7 +225,6 @@ func (am *AchievementManager) loadDefaultAchievements() {
 		am.achievements[achievement.ID] = achievement
 	}
 
-	log.Printf("Loaded %d default achievements", len(defaultAchievements))
 }
 
 // saveDefaultAchievements saves default achievements to database
@@ -264,7 +262,6 @@ func (am *AchievementManager) saveDefaultAchievements() error {
 		}
 	}
 
-	log.Printf("Saved %d achievements to database", len(am.achievements))
 	return nil
 }
 
@@ -300,7 +297,6 @@ func (am *AchievementManager) CheckUserAchievements(user *User) ([]*Achievement,
 		if am.checker.Check(user, achievement) {
 			// Award the achievement
 			if err := am.AwardAchievement(user.UserID, achievement.ID); err != nil {
-				log.Printf("Failed to award achievement %s to user %d: %v", achievement.Name, user.UserID, err)
 				continue
 			}
 			newAchievements = append(newAchievements, achievement)
@@ -311,9 +307,7 @@ func (am *AchievementManager) CheckUserAchievements(user *User) ([]*Achievement,
 					ChipsIncrement:   achievement.ChipsReward,
 					TotalXPIncrement: achievement.XPReward,
 				}
-				if _, err := UpdateCachedUser(user.UserID, updates); err != nil {
-					log.Printf("Failed to apply achievement rewards for %s: %v", achievement.Name, err)
-				}
+				UpdateCachedUser(user.UserID, updates)
 			}
 		}
 	}
@@ -375,9 +369,7 @@ func (am *AchievementManager) BatchCheckAchievements(users []*User) (map[int64][
 
 	// Batch award achievements and apply rewards
 	if len(results) > 0 {
-		if err := am.BatchAwardAchievements(results); err != nil {
-			log.Printf("Failed to batch award achievements: %v", err)
-		}
+		am.BatchAwardAchievements(results)
 	}
 
 	return results, nil
@@ -525,9 +517,6 @@ func (am *AchievementManager) AwardAchievement(userID int64, achievementID int) 
 	achievement := am.achievements[achievementID]
 	am.mutex.RUnlock()
 
-	if achievement != nil {
-		log.Printf("Awarded achievement '%s' to user %d", achievement.Name, userID)
-	}
 
 	return nil
 }
@@ -588,11 +577,6 @@ func SendAchievementNotification(session *discordgo.Session, interaction *discor
 	}
 
 	// Log the notification
-	if len(achievements) == 1 {
-		log.Printf("Sent achievement notification to user %s: %s", interaction.Member.User.ID, achievements[0].Name)
-	} else {
-		log.Printf("Sent %d achievement notifications to user %s", len(achievements), interaction.Member.User.ID)
-	}
 
 	return nil
 }

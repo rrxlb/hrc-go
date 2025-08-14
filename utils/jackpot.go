@@ -53,16 +53,13 @@ const (
 
 // InitializeJackpotManager sets up the jackpot system
 func InitializeJackpotManager() error {
-	log.Println("[jackpot] init start")
 	JackpotMgr = &JackpotManager{jackpots: make(map[JackpotType]*Jackpot)}
 	if err := JackpotMgr.createJackpotsTable(); err != nil {
 		return fmt.Errorf("failed to create jackpots table: %w", err)
 	}
 	if err := JackpotMgr.loadJackpots(); err != nil {
-		log.Printf("[jackpot] loadJackpots error: %v", err)
 		return err
 	}
-	log.Println("[jackpot] init complete")
 	return nil
 }
 
@@ -145,7 +142,6 @@ func (jm *JackpotManager) loadJackpots() error {
 			&jackpot.LastWinTime,
 			&jackpot.UpdatedAt,
 		); err != nil {
-			log.Printf("Failed to scan jackpot: %v", err)
 			continue
 		}
 		jackpot.Type = JackpotType(jackpotType)
@@ -154,12 +150,9 @@ func (jm *JackpotManager) loadJackpots() error {
 	}
 
 	if loaded == 0 { // nothing persisted yet; write defaults
-		log.Println("[jackpot] seeding defaults (empty table)")
 		if err := jm.saveDefaultJackpots(); err != nil {
 			return err
 		}
-		// defaults saved
-		jm.logRowCount()
 		return nil
 	}
 
@@ -170,8 +163,6 @@ func (jm *JackpotManager) loadJackpots() error {
 	}
 	jm.mutex.Unlock()
 
-	log.Printf("[jackpot] loaded=%d", loaded)
-	jm.logRowCount()
 	return nil
 }
 
@@ -191,7 +182,6 @@ func (jm *JackpotManager) initializeDefaultJackpots() {
 	for _, jp := range defaultJackpots {
 		jm.jackpots[jp.Type] = jp
 	}
-	log.Printf("Initialized %d default jackpots (slots only)", len(defaultJackpots))
 }
 
 // Prune unwanted jackpot types (e.g., remove legacy 'general')
@@ -213,7 +203,6 @@ func (jm *JackpotManager) PruneToSlotsOnly() {
 func (jm *JackpotManager) saveDefaultJackpots() error {
 	// save defaults
 	if DB == nil {
-		log.Println("[jackpot] DB nil; skipping saveDefaultJackpots (running in memory-only mode)")
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -254,57 +243,9 @@ func (jm *JackpotManager) saveDefaultJackpots() error {
 		jackpot.Amount = persistedAmount // ensure memory matches DB
 		inserted++
 	}
-	jm.logRowCount()
-	// Extra verification pass
-	jm.ensurePersisted()
 	return nil
 }
 
-// ensurePersisted re-selects jackpots to verify they exist and logs discrepancies.
-func (jm *JackpotManager) ensurePersisted() {
-	if DB == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	rows, err := DB.Query(ctx, `SELECT type, amount FROM jackpots`)
-	if err != nil {
-		log.Printf("[jackpot] ensurePersisted query error: %v", err)
-		return
-	}
-	defer rows.Close()
-	found := map[string]int64{}
-	for rows.Next() {
-		var t string
-		var amt int64
-		if err := rows.Scan(&t, &amt); err != nil {
-			log.Printf("[jackpot] ensurePersisted scan err: %v", err)
-			continue
-		}
-		found[t] = amt
-	}
-	for jt := range jm.jackpots {
-		if _, ok := found[string(jt)]; !ok {
-			log.Printf("[jackpot] ensurePersisted MISSING jackpot type=%s in DB after save", jt)
-		}
-	}
-	// ensurePersisted check complete
-}
-
-// logRowCount prints current jackpot row count for diagnostics
-func (jm *JackpotManager) logRowCount() {
-	if DB == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	var cnt int
-	if err := DB.QueryRow(ctx, "SELECT COUNT(*) FROM jackpots").Scan(&cnt); err != nil {
-		log.Printf("[jackpot] row count query error: %v", err)
-		return
-	}
-	log.Printf("[jackpot] jackpots table row count=%d", cnt)
-}
 
 // ContributeToJackpot adds a contribution to the specified jackpot
 func (jm *JackpotManager) ContributeToJackpot(jackpotType JackpotType, betAmount int64) (int64, error) {
@@ -328,9 +269,7 @@ func (jm *JackpotManager) ContributeToJackpot(jackpotType JackpotType, betAmount
 
 	// Second: perform DB write outside lock
 	if DB != nil {
-		if err := jm.updateJackpotInDB(&snapshot); err != nil {
-			log.Printf("[jackpot] ContributeToJackpot db update err type=%s: %v", jackpotType, err)
-		}
+		jm.updateJackpotInDB(&snapshot)
 	}
 	// contribution applied
 	return contribution, nil
@@ -361,14 +300,9 @@ func (jm *JackpotManager) updateJackpotInDB(jackpot *Jackpot) error {
 	}
 	rows := ct.RowsAffected()
 	if rows == 0 {
-		log.Printf("[jackpot] updateJackpotInDB affected 0 rows for type=%s (will attempt insert)", jackpot.Type)
 		// attempt insert (race where row missing)
 		ins := `INSERT INTO jackpots (type, amount, seed_amount, contribution_rate, updated_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (type) DO NOTHING`
-		if _, ierr := DB.Exec(ctx, ins, string(jackpot.Type), jackpot.Amount, jackpot.SeedAmount, jackpot.ContributionRate, jackpot.UpdatedAt); ierr != nil {
-			log.Printf("[jackpot] fallback insert failed for type=%s err=%v", jackpot.Type, ierr)
-		} else {
-			log.Printf("[jackpot] fallback insert success for missing type=%s", jackpot.Type)
-		}
+		DB.Exec(ctx, ins, string(jackpot.Type), jackpot.Amount, jackpot.SeedAmount, jackpot.ContributionRate, jackpot.UpdatedAt)
 	}
 	return nil
 }
@@ -416,9 +350,7 @@ func (jm *JackpotManager) TryWinJackpot(jackpotType JackpotType, userID int64, b
 
 		// Update database
 		if DB != nil {
-			if err := jm.updateJackpotInDB(jackpot); err != nil {
-				log.Printf("Failed to update jackpot after win: %v", err)
-			}
+			jm.updateJackpotInDB(jackpot)
 		}
 
 		log.Printf("🎉 JACKPOT WON! User %d won %d chips from %s jackpot (bet: %d, probability: %.8f)",
@@ -493,7 +425,6 @@ func (jm *JackpotManager) ResetJackpot(jackpotType JackpotType) error {
 		}
 	}
 
-	log.Printf("Reset %s jackpot from %d to %d chips", jackpotType, oldAmount, jackpot.Amount)
 	return nil
 }
 

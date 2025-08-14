@@ -67,7 +67,6 @@ func RegisterSlotsCommand() *discordgo.ApplicationCommand {
 // HandleSlotsCommand handles /slots
 func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
-		log.Printf("[slots] defer failed: %v", err)
 		return
 	}
 
@@ -75,32 +74,27 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	userID, _ := utils.ParseUserID(i.Member.User.ID)
 	user, err := utils.GetCachedUser(userID)
 	if err != nil {
-		editErr := utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", "Error fetching user.", 0xFF0000), nil)
-		log.Printf("[slots] user fetch error=%v editErr=%v", err, editErr)
+		utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", "Error fetching user.", 0xFF0000), nil)
 		return
 	}
 	bet, err := utils.ParseBet(betStr, user.Chips)
 	if err != nil {
-		editErr := utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet error: %s", err.Error()), 0xFF0000), nil)
-		log.Printf("[slots] bet parse error=%v editErr=%v", err, editErr)
+		utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet error: %s", err.Error()), 0xFF0000), nil)
 		return
 	}
 	adjusted, note := normalizeBetForPaylines(bet, user.Chips)
 	if adjusted == 0 {
-		editErr := utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet must be at least %d & divisible by %d", minBet, payLines), 0xFF0000), nil)
-		log.Printf("[slots] bet normalization failed editErr=%v", editErr)
+		utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet must be at least %d & divisible by %d", minBet, payLines), 0xFF0000), nil)
 		return
 	}
 	game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, BetNote: note, Rand: rand.New(rand.NewSource(time.Now().UnixNano())), UsedOriginal: true}
 	game.BaseGame.CountWinLossMinRatio = 0.20
 	if err := game.ValidateBet(); err != nil {
-		editErr := utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", err.Error(), 0xFF0000), nil)
-		log.Printf("[slots] validate bet error=%v editErr=%v", err, editErr)
+		utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", err.Error(), 0xFF0000), nil)
 		return
 	}
 	initial := game.buildEmbed("", 0, 0, false, 0)
 	if err := utils.EditOriginalInteraction(s, i, initial, nil); err != nil {
-		log.Printf("[slots] initial edit failed: %v", err)
 		return
 	}
 	// Contribute to jackpot asynchronously to avoid blocking main interaction flow
@@ -116,7 +110,6 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		game.ChannelID = orig.ChannelID
 		// message id captured
 	} else {
-		log.Printf("[slots] failed to get original response: %v", err)
 		return
 	}
 	// start play loop
@@ -145,7 +138,6 @@ func normalizeBetForPaylines(bet, balance int64) (int64, string) {
 func (g *Game) play() {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[slots] panic recovered: %v", r)
 		}
 	}()
 	// play start
@@ -158,16 +150,13 @@ func (g *Game) play() {
 	}())
 	// If we don't already have a message (e.g., original edit failed), attempt a followup now
 	if g.MessageID == "" || g.ChannelID == "" {
-		log.Printf("[slots] no message id yet; creating followup")
 		embed := g.buildEmbed("", 0, 0, false, 0)
 		msg, err := g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Embeds: []*discordgo.MessageEmbed{embed}})
 		if err != nil {
-			log.Printf("[slots] followup still failed: %v", err)
 			return
 		}
 		g.MessageID = msg.ID
 		g.ChannelID = msg.ChannelID
-		log.Printf("[slots] obtained message via followup id=%s", g.MessageID)
 	}
 	final := g.createReels()
 	g.animateSpin(final)
@@ -235,7 +224,6 @@ func (g *Game) play() {
 	components := []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{utils.CreateButton("slots_spin_again_"+g.MessageID, "Spin Again", discordgo.SuccessButton, false, nil)}}}
 	embeds := []*discordgo.MessageEmbed{finalEmbed}
 	if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds, Components: &components}); err != nil {
-		log.Printf("[slots] final (pre-DB) edit failed: %v", err)
 	}
 	// Fallback retry: sometimes the final edit may be lost; re-issue once after short delay if message not in final phase
 	go func(msgID, channelID string, embed *discordgo.MessageEmbed, comps []discordgo.MessageComponent) {
@@ -243,7 +231,6 @@ func (g *Game) play() {
 		defer func() { recover() }()
 		m, err := g.Session.ChannelMessage(channelID, msgID)
 		if err != nil {
-			log.Printf("[slots] fallback fetch err: %v", err)
 			return
 		}
 		if m != nil && len(m.Embeds) > 0 && strings.Contains(strings.ToLower(m.Embeds[0].Title), "results") {
@@ -251,7 +238,6 @@ func (g *Game) play() {
 		}
 		embedsRetry := []*discordgo.MessageEmbed{embed}
 		if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: msgID, Channel: channelID, Embeds: &embedsRetry, Components: &comps}); err != nil {
-			log.Printf("[slots] fallback final edit failed: %v", err)
 		} else {
 			// fallback applied
 		}
@@ -266,7 +252,6 @@ func (g *Game) play() {
 		defer func() { recover() }()
 		updatedUser, err := g.EndGame(profit)
 		if err != nil {
-			log.Printf("[slots] EndGame error: %v", err)
 			return
 		}
 		jackpotAmt := initialJackpot
@@ -285,7 +270,6 @@ func (g *Game) play() {
 			}
 			embeds2 := []*discordgo.MessageEmbed{finalEmbed2}
 			if _, e := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds2, Components: &components}); e != nil {
-				log.Printf("[slots] post-DB jackpot embed edit failed: %v", e)
 			}
 		}
 		afterRank := getRankForXP(updatedUser.TotalXP)
@@ -477,7 +461,6 @@ func (g *Game) animateSpin(final [][]string) {
 		embed := g.buildEmbed(formatReels(frame), 0, 0, false, 0)
 		embeds := []*discordgo.MessageEmbed{embed}
 		if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds}); err != nil {
-			log.Printf("[slots] anim edit step=%d err=%v", step, err)
 		}
 		if step < totalSteps-1 {
 			time.Sleep(180 * time.Millisecond)
@@ -523,7 +506,6 @@ func HandleSlotsInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 	// Update message immediately to spinning state (component update) and reuse same message
 	spinning := utils.CreateBrandedEmbed("🎰 Slot Machine", "Spinning the reels...", 0x3498db)
 	if err := utils.UpdateComponentInteraction(s, i, spinning, []discordgo.MessageComponent{}); err != nil {
-		log.Printf("[slots] spin_again update err=%v", err)
 		return
 	}
 	game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, Rand: rand.New(rand.NewSource(time.Now().UnixNano())), MessageID: i.Message.ID, ChannelID: i.ChannelID, UsedOriginal: true}

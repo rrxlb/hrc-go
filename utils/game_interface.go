@@ -362,7 +362,6 @@ func (gm *GameManager) cleanupExpiredGames() {
 	}
 
 	if len(expiredGames) > 0 {
-		fmt.Printf("Cleaned up %d expired games", len(expiredGames))
 	}
 }
 

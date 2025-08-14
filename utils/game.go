@@ -179,14 +179,12 @@ func (bg *BaseGame) checkAchievements(profit int64, user *User) {
 	if AchievementMgr != nil {
 		newAchievements, err := AchievementMgr.CheckUserAchievements(user)
 		if err != nil {
-			log.Printf("Error checking achievements for user %d: %v", bg.UserID, err)
 			return
 		}
 
 		// Send notification if achievements were earned
 		if len(newAchievements) > 0 {
 			if err := SendAchievementNotification(bg.Session, bg.Interaction, newAchievements); err != nil {
-				log.Printf("Failed to send achievement notification to user %d: %v", bg.UserID, err)
 			}
 		}
 	}
@@ -202,7 +200,6 @@ func (bg *BaseGame) cleanupAchievementCache(currentTime time.Time) {
 		}
 	}
 
-	log.Printf("Cleaned up achievement check cache, active entries: %d", len(lastAchievementCheck))
 }
 
 // RespondWithError sends an error response to the user
@@ -308,6 +305,5 @@ func (gm *GameManager) CleanupExpiredGames(maxAge time.Duration) {
 	}
 
 	if len(expiredGames) > 0 {
-		log.Printf("Cleaned up %d expired games", len(expiredGames))
 	}
 }

@@ -249,10 +249,6 @@ func GetCachedUser(userID int64) (*User, error) {
 	// Try cache first with zero-copy optimization
 	if Cache != nil {
 		if user, found := Cache.Get(userID); found {
-			// Log only if cache lookup takes unusually long (should be <1ms)
-			if duration := time.Since(start); duration > 5*time.Millisecond {
-				log.Printf("Slow cache hit for user %d: %dms", userID, duration.Milliseconds())
-			}
 			return user, nil
 		}
 	}
@@ -264,20 +260,12 @@ func GetCachedUser(userID int64) (*User, error) {
 		return nil, err
 	}
 
-	// Log slow database operations (>100ms is concerning)
-	if duration := time.Since(dbStart); duration > 100*time.Millisecond {
-		log.Printf("Slow database query for user %d: %dms", userID, duration.Milliseconds())
-	}
 
 	// Store in cache if cache is initialized
 	if Cache != nil {
 		Cache.Set(userID, user)
 	}
 
-	// Log total operation time if slow (cache miss + DB query should be <200ms)
-	if totalDuration := time.Since(start); totalDuration > 200*time.Millisecond {
-		log.Printf("Slow GetCachedUser operation for user %d: %dms (cache miss)", userID, totalDuration.Milliseconds())
-	}
 
 	return user, nil
 }
@@ -298,12 +286,7 @@ func UpdateCachedUser(userID int64, updates UserUpdateData) (*User, error) {
 	// Check for new achievements asynchronously for performance
 	if AchievementMgr != nil {
 		go func(u *User, uid int64) {
-			if newAchievements, err := AchievementMgr.CheckUserAchievements(u); err != nil {
-				// Only log errors to avoid performance impact
-				log.Printf("Failed to check achievements for user %d: %v", uid, err)
-			} else if len(newAchievements) > 0 {
-				log.Printf("User %d earned %d new achievements", uid, len(newAchievements))
-			}
+			AchievementMgr.CheckUserAchievements(u)
 		}(user, userID)
 	}
 

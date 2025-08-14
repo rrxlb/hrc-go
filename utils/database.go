@@ -108,7 +108,6 @@ func (j *JSONB) Scan(value interface{}) error {
 
 	var data map[string]interface{}
 	if err := json.Unmarshal(bytes, &data); err != nil {
-		log.Printf("Error unmarshaling JSONB: %v, data: %s", err, string(bytes))
 		// Don't return error, just set to empty map
 		*j = make(JSONB)
 		return nil
@@ -160,7 +159,6 @@ func SetupDatabase() error {
 
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		log.Printf("DATABASE_URL not set, skipping database initialization")
 		return nil
 	}
 
@@ -196,22 +194,15 @@ func SetupDatabase() error {
 	DB = pool
 	dbInitialized = true
 
-	log.Printf("Database connection initialized successfully")
 
 	// Ensure core tables exist
-	if err := createUsersTable(); err != nil {
-		log.Printf("Warning: Failed to create users table: %v", err)
-	}
+	createUsersTable()
 
 	// Create user_achievements table if it doesn't exist
-	if err := createUserAchievementsTable(); err != nil {
-		log.Printf("Warning: Failed to create user_achievements table: %v", err)
-	}
+	createUserAchievementsTable()
 
 	// Create performance indexes
-	if err := createPerformanceIndexes(); err != nil {
-		log.Printf("Warning: Failed to create performance indexes: %v", err)
-	}
+	createPerformanceIndexes()
 
 	// Note: Prepared statements removed due to connection pool compatibility issues
 	// Database queries will use direct SQL for reliable operation
@@ -228,19 +219,12 @@ func CloseDatabase() {
 		DB.Close()
 		DB = nil
 		dbInitialized = false
-		log.Printf("Database connection closed")
 	}
 }
 
 // GetUser retrieves a user from the database, creating one if it doesn't exist
 func GetUser(userID int64) (*User, error) {
 	start := time.Now()
-	defer func() {
-		duration := time.Since(start)
-		if duration > 50*time.Millisecond {
-			log.Printf("Slow database GetUser: %dms", duration.Milliseconds())
-		}
-	}()
 
 	if DB == nil {
 		return &User{
@@ -710,7 +694,6 @@ func createUserAchievementsTable() error {
 		return fmt.Errorf("failed to create user_achievements table: %w", err)
 	}
 
-	log.Println("user_achievements table created/verified successfully")
 	return nil
 }
 
@@ -744,7 +727,6 @@ func createUsersTable() error {
 	if _, err := DB.Exec(ctx, query); err != nil {
 		return fmt.Errorf("failed to create users table: %w", err)
 	}
-	log.Println("users table created/verified successfully")
 	return nil
 }
 
@@ -784,13 +766,9 @@ func createPerformanceIndexes() error {
 	}
 
 	for _, query := range indexes {
-		if _, err := DB.Exec(ctx, query); err != nil {
-			// Log but don't fail - indexes might already exist
-			log.Printf("Index creation info: %v", err)
-		}
+		DB.Exec(ctx, query)
 	}
 
-	log.Println("Performance indexes created/verified successfully")
 	return nil
 }
 

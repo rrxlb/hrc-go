@@ -86,8 +86,5 @@ var GlobalTopGGClient *TopGGClient
 func InitializeTopGGClient(botID string) {
 	GlobalTopGGClient = NewTopGGClient(botID)
 	if GlobalTopGGClient != nil {
-		fmt.Printf("Top.gg client initialized for bot ID: %s\n", botID)
-	} else {
-		fmt.Println("Top.gg client not initialized - TOPGG_API_TOKEN not found")
 	}
 }

@@ -59,15 +59,12 @@ func main() {
 	// Initialize cache system (5 minute TTL for better responsiveness)
 	utils.InitializeCache(5 * time.Minute)
 	defer utils.CloseCache()
-	log.Println("Cache system initialized")
 
 	// Initialize centralized game state management
 	utils.InitializeGameManager()
 	defer utils.CloseGameManager()
-	log.Println("Centralized game manager initialized")
 
 	// Heavy subsystems deferred until after READY to reduce startup latency
-	log.Println("Deferring achievement & jackpot initialization until READY...")
 
 	// Get bot token from environment (common variable names)
 	var token string
@@ -89,17 +86,11 @@ func main() {
 	// Basic structural validation (3 segments, first decodes to numeric ID)
 	parts := strings.Split(token, ".")
 	if len(parts) < 3 {
-		log.Printf("Token appears malformed (segments=%d). Recheck BOT_TOKEN value.", len(parts))
 		botStatus = "invalid_token"
 		select {}
 	}
 	if userIDPart, err := base64.RawStdEncoding.DecodeString(parts[0]); err == nil {
 		// Expect numeric user ID
-		if _, convErr := strconv.ParseInt(string(userIDPart), 10, 64); convErr != nil {
-			log.Printf("First token segment decoded but not numeric (%q). Token likely wrong.", string(userIDPart))
-		}
-	} else {
-		log.Printf("Failed to base64 decode first token segment: %v (segment=%s)", err, parts[0])
 	}
 	// Token validated and sanitized
 
@@ -117,7 +108,6 @@ func main() {
 	// Optional: uncomment if you later need message content
 	// session.Identify.Intents |= discordgo.IntentMessageContent
 
-	log.Println("Starting Discord session...")
 
 	// Add event handlers
 	session.AddHandler(onReady)
@@ -130,18 +120,16 @@ func main() {
 		botStatus = "connection_failed"
 		select {}
 	}
-	log.Println("Waiting for READY (30s timeout)...")
 
 	// Wait for READY or timeout to help diagnose hanging
 	select {
 	case <-readyCh:
 		// READY received
 	case <-time.After(30 * time.Second):
-		log.Println("READY not received in 30s (continuing). Ensure bot is in a guild and intents enabled if interactions fail.")
+		// Continue without logging timeout
 	}
 	defer session.Close()
 
-	log.Println("Bot is now running. Press CTRL+C to exit.")
 	botStatus = "running"
 
 	// (Removed verbose heartbeat logging)
@@ -166,7 +154,7 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 	}
 
 	// Set bot presence
-	if err := s.UpdateStatusComplex(discordgo.UpdateStatusData{
+	s.UpdateStatusComplex(discordgo.UpdateStatusData{
 		Activities: []*discordgo.Activity{
 			{
 				Name: "Casino Games - Go Version",
@@ -174,16 +162,11 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 			},
 		},
 		Status: "online",
-	}); err != nil {
-		log.Printf("Failed to update status: %v", err)
-	}
+	})
 
 	// Register commands first for fastest response
-	start := time.Now()
 	if err := registerSlashCommands(s); err != nil {
 		log.Printf("Failed to register slash commands: %v", err)
-	} else {
-		log.Printf("Slash commands ready in %dms", time.Since(start).Milliseconds())
 	}
 
 	// Initialize heavy systems in background
@@ -197,8 +180,6 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 		// Initialize achievement system
 		if err := utils.InitializeAchievementManager(); err != nil {
 			log.Printf("Achievement manager init failed: %v", err)
-		} else {
-			log.Println("Achievement system initialized")
 		}
 
 		// Initialize jackpot system
@@ -345,7 +326,6 @@ func registerSlashCommands(s *discordgo.Session) error {
 	oldHashBytes, _ := os.ReadFile(hashFile)
 	oldHash := strings.TrimSpace(string(oldHashBytes))
 	if oldHash == newHash {
-		log.Println("Commands unchanged; skipping registration")
 		return nil
 	}
 	// Register guild commands (includes global + guild-only)
@@ -353,18 +333,10 @@ func registerSlashCommands(s *discordgo.Session) error {
 	if err != nil {
 		return fmt.Errorf("guild bulk overwrite failed: %w", err)
 	}
-	log.Printf("Registered/updated %d guild commands (hash %s)", len(registeredGuild), newHash[:8])
 	// Global sync (may take up to an hour to propagate)
 	// Register only global commands globally
 	registeredGlobal, gErr := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", globalCommands)
-	if gErr != nil {
-		log.Printf("Global command sync failed: %v", gErr)
-	} else {
-		log.Printf("Queued %d global commands for sync", len(registeredGlobal))
-	}
-	if err := os.WriteFile(hashFile, []byte(newHash), 0644); err != nil {
-		log.Printf("Failed to write command hash: %v", err)
-	}
+	os.WriteFile(hashFile, []byte(newHash), 0644)
 	return nil
 }
 
@@ -1157,7 +1129,6 @@ func handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			"Could not verify your vote with Top.gg. Please try again later.",
 			0xE74C3C)
 		utils.SendInteractionResponse(s, i, embed, nil, true)
-		log.Printf("Top.gg vote check error for user %s: %v", i.Member.User.ID, err)
 		return
 	}
 
@@ -1188,8 +1159,7 @@ func handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				if updatedUser, err := utils.GetUser(userID); err == nil {
 					newlyAwarded, err := utils.AchievementMgr.CheckUserAchievements(updatedUser)
 					if err == nil && len(newlyAwarded) > 0 {
-						log.Printf("User %d earned %d achievements from voting", userID, len(newlyAwarded))
-						// Could send achievement notification here if needed
+								// Could send achievement notification here if needed
 					}
 				}
 			}

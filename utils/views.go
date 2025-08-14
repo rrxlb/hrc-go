@@ -25,7 +25,6 @@ var Components = &ComponentManager{
 // RegisterHandler registers a component handler for a specific custom ID
 func (cm *ComponentManager) RegisterHandler(customID string, handler ComponentHandler) {
 	cm.handlers[customID] = handler
-	log.Printf("Registered component handler for: %s", customID)
 }
 
 // HandleInteraction handles a component interaction
@@ -309,7 +308,6 @@ func SendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreat
 		} else if i.Type == discordgo.InteractionMessageComponent {
 			cmdName = i.MessageComponentData().CustomID
 		}
-		log.Printf("SendInteractionResponse error (cmd=%s user=%s): %v", cmdName, i.Member.User.ID, err)
 	}
 	return err
 }
@@ -409,7 +407,6 @@ func GetOriginalResponseMessage(s *discordgo.Session, i *discordgo.InteractionCr
 
 // BotLogf provides centralized formatted logging for component/game issues
 func BotLogf(area string, format string, args ...interface{}) {
-	log.Printf("[%s] "+format, append([]interface{}{area}, args...)...)
 }
 
 // TryEphemeralFollowup attempts to send a small ephemeral notice if an update failed.
