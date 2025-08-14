@@ -157,8 +157,8 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 	s.UpdateStatusComplex(discordgo.UpdateStatusData{
 		Activities: []*discordgo.Activity{
 			{
-				Name: "Casino Games - Go Version",
-				Type: discordgo.ActivityTypeGame,
+				Name: "/help for commands",
+				Type: discordgo.ActivityTypeListening,
 			},
 		},
 		Status: "online",
