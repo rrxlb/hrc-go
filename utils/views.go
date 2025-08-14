@@ -453,14 +453,14 @@ func IsWebhookExpired(err error) bool {
 
 	// Fast string checks for webhook expiration
 	errMsg := err.Error()
-	return errMsg == "Unknown Webhook" || 
-		   errMsg == "The provided webhook does not exist." ||
-		   ContainsAny(errMsg, []string{
-			   "\"code\": 10015", // Unknown Webhook
-			   "\"code\":10015",  // Unknown Webhook (no space)
-			   "404",             // Not Found
-			   "token is invalid",
-		   })
+	return errMsg == "Unknown Webhook" ||
+		errMsg == "The provided webhook does not exist." ||
+		ContainsAny(errMsg, []string{
+			"\"code\": 10015", // Unknown Webhook
+			"\"code\":10015",  // Unknown Webhook (no space)
+			"404",             // Not Found
+			"token is invalid",
+		})
 }
 
 // IsInteractionAlreadyAcknowledged checks for interaction already acknowledged error (code 40060)
@@ -505,12 +505,12 @@ func IsRateLimited(err error) (bool, time.Duration) {
 
 // CircuitBreaker implements fast-fail pattern for Discord API calls
 type CircuitBreaker struct {
-	maxFailures    int
-	resetTimeout   time.Duration
-	failureCount   int
-	lastFailure    time.Time
-	state          string // "closed", "open", "half-open"
-	mutex          sync.RWMutex
+	maxFailures  int
+	resetTimeout time.Duration
+	failureCount int
+	lastFailure  time.Time
+	state        string // "closed", "open", "half-open"
+	mutex        sync.RWMutex
 }
 
 // NewCircuitBreaker creates a new circuit breaker
@@ -576,14 +576,14 @@ var (
 // Returns a channel that will receive the actual update result asynchronously
 func FastUpdateInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) <-chan error {
 	resultChan := make(chan error, 1)
-	
+
 	// Execute Discord API call asynchronously
 	go func() {
 		defer close(resultChan)
 		err := UpdateInteractionResponseWithTimeout(s, i, embed, components, 3*time.Second)
 		resultChan <- err
 	}()
-	
+
 	return resultChan
 }
 
@@ -598,25 +598,25 @@ func ImmediateResponsePattern(s *discordgo.Session, i *discordgo.InteractionCrea
 			Text: "Loading game state...",
 		},
 	}
-	
+
 	// Send immediate response
 	err := SendInteractionResponseWithTimeout(s, i, loadingEmbed, nil, false, 1*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to send immediate response: %w", err)
 	}
-	
+
 	// Update with full content asynchronously (non-blocking)
 	go func() {
 		// Brief delay to ensure Discord processed the first response
 		time.Sleep(50 * time.Millisecond)
-		
+
 		// Update with full game content
 		updateErr := UpdateInteractionResponseWithTimeout(s, i, fullEmbed, fullComponents, 3*time.Second)
 		if updateErr != nil {
 			BotLogf("DISCORD_API", "Failed to update with full content: %v", updateErr)
 		}
 	}()
-	
+
 	return nil
 }
 
@@ -628,7 +628,7 @@ func OptimizedGameStart(s *discordgo.Session, i *discordgo.InteractionCreate, ga
 		// This is a deferred slash command - update directly
 		return UpdateInteractionResponseWithTimeout(s, i, gameEmbed, gameComponents, 2*time.Second)
 	}
-	
+
 	// For component interactions, use immediate update
 	return UpdateComponentInteractionWithTimeout(s, i, gameEmbed, gameComponents, 2*time.Second)
 }
@@ -702,10 +702,10 @@ func QuickGameResponse(
 ) error {
 	// For fresh interactions (not deferred), use the edit-after pattern
 	// For deferred interactions, use direct update pattern
-	
+
 	// Check if this is a fresh interaction by attempting to detect if it was deferred
 	// We can infer this from the interaction type and context
-	
+
 	// Use deferred response pattern directly - this is safer for slash commands
 	return QuickDeferredResponse(session, interaction, gameEmbed, gameComponents, gameTitle)
 }

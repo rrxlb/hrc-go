@@ -175,7 +175,7 @@ func (bg *BlackjackGame) StartGame() error {
 func (bg *BlackjackGame) captureMessageIDAsync() {
 	// Brief delay to ensure Discord processed the response
 	time.Sleep(100 * time.Millisecond)
-	
+
 	if m2, e2 := utils.GetOriginalResponseMessage(bg.Session, bg.Interaction); e2 == nil && m2 != nil {
 		bg.ChannelID = m2.ChannelID
 		bg.MessageID = m2.ID
@@ -1021,7 +1021,7 @@ func (bg *BlackjackGame) fallbackEdit(embed *discordgo.MessageEmbed, components 
 			bg.MessageID = bg.Interaction.Message.ID
 		}
 	}
-	
+
 	if bg.ChannelID == "" || bg.MessageID == "" {
 		utils.WebhookCircuitBreaker.RecordFailure()
 		return fmt.Errorf("missing message/channel id for fallback edit")
@@ -1030,7 +1030,7 @@ func (bg *BlackjackGame) fallbackEdit(embed *discordgo.MessageEmbed, components 
 	// Perform channel edit with timeout
 	embeds := []*discordgo.MessageEmbed{embed}
 	edit := &discordgo.MessageEdit{ID: bg.MessageID, Channel: bg.ChannelID, Embeds: &embeds, Components: &components}
-	
+
 	// Add timeout to channel edit
 	type result struct {
 		msg *discordgo.Message

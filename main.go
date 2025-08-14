@@ -250,6 +250,10 @@ func registerSlashCommands(s *discordgo.Session) error {
 			Description: "Vote for the bot on Top.gg to claim your bonus",
 		},
 		{
+			Name:        "bonus",
+			Description: "Claim your server bonus (High Roller Club members only)",
+		},
+		{
 			Name:        "premium",
 			Description: "Manage your premium features",
 		},
@@ -362,6 +366,8 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			handleClaimAllCommand(s, i)
 		case "vote":
 			handleVoteCommand(s, i)
+		case "bonus":
+			handleBonusServerCommand(s, i)
 		case "leaderboard":
 			handleLeaderboardCommand(s, i)
 		case "prestige":
@@ -712,7 +718,7 @@ func handleHelpCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Categories similar to Python
 	cats := map[string][]string{
 		"Casino Games":   {"blackjack", "baccarat", "craps", "horl", "mines", "derby", "roulette", "slots", "tcpoker"},
-		"Bonuses":        {"hourly", "daily", "weekly", "vote", "claimall", "cooldowns"},
+		"Bonuses":        {"hourly", "daily", "weekly", "vote", "bonus", "claimall", "cooldowns"},
 		"Profile / Rank": {"profile", "balance", "premium"},
 		"Admin":          {"addchips"},
 		"Help":           {"help"},
@@ -731,6 +737,7 @@ func handleHelpCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		"daily":     "Claim your daily bonus",
 		"weekly":    "Claim your weekly bonus",
 		"vote":      "Vote on Top.gg for bonus chips",
+		"bonus":     "Claim server bonus (High Roller Club members)",
 		"claimall":  "Claim all available bonuses",
 		"cooldowns": "View your bonus cooldowns",
 		"profile":   "View your casino profile and stats",
@@ -980,6 +987,65 @@ func handleBonusCommand(s *discordgo.Session, i *discordgo.InteractionCreate, bo
 	})
 }
 
+func handleBonusServerCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
+
+	// Check if user is in the main support server
+	if !utils.IsUserInMainSupportServer(s, i.Member.User.ID) {
+		embed := utils.CreateBrandedEmbed("🏠 High Roller Club Bonus",
+			"You need to join the main support server to claim this bonus!\n\n[🔗 Join High Roller Club](https://discord.gg/RK4K8tDsHB)",
+			0xE74C3C)
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Embeds: []*discordgo.MessageEmbed{embed},
+			},
+		})
+		return
+	}
+
+	// Check if command is being run in the main support server
+	if i.GuildID != utils.MainSupportServerID {
+		embed := utils.CreateBrandedEmbed("🏠 High Roller Club Bonus",
+			"This command can only be used in the main support server!\n\n[🔗 Join High Roller Club](https://discord.gg/RK4K8tDsHB)",
+			0xE74C3C)
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Embeds: []*discordgo.MessageEmbed{embed},
+			},
+		})
+		return
+	}
+
+	// Get or create user
+	user, err := utils.GetCachedUser(userID)
+	if err != nil {
+		respondWithError(s, i, "❌ Error accessing user data. Database may be unavailable.")
+		return
+	}
+
+	// Attempt to claim server bonus
+	result, err := utils.BonusMgr.ClaimBonusWithNotification(user, utils.BonusServer, s, i)
+	if err != nil {
+		respondWithError(s, i, "❌ An error occurred while claiming bonus.")
+		return
+	}
+
+	// Create and send embed
+	title := "🏠 High Roller Club Bonus"
+	embed := utils.BonusMgr.CreateBonusEmbed(user, result, title)
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
+}
+
 func handleCooldownsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	userID, _ := strconv.ParseInt(i.Member.User.ID, 10, 64)
 
@@ -1011,8 +1077,8 @@ func handleClaimAllCommand(s *discordgo.Session, i *discordgo.InteractionCreate)
 		return
 	}
 
-	// Claim all available bonuses
-	claimedBonuses, err := utils.BonusMgr.ClaimAllAvailableBonuses(user)
+	// Claim all available bonuses (including server bonus if user is in main guild)
+	claimedBonuses, err := utils.BonusMgr.ClaimAllAvailableBonusesWithGuildCheck(user, s, i.Member.User.ID)
 	if err != nil {
 		respondWithError(s, i, "❌ An error occurred while claiming bonuses.")
 		return

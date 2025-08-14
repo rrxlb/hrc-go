@@ -77,7 +77,7 @@ func (do *DiscordOptimizer) OptimizedInteractionRespond(
 	timeout time.Duration,
 ) error {
 	startTime := time.Now()
-	
+
 	// Increment total requests counter
 	atomic.AddInt64(&do.metrics.TotalRequests, 1)
 
@@ -129,7 +129,7 @@ func (do *DiscordOptimizer) OptimizedInteractionResponseEdit(
 	timeout time.Duration,
 ) (*discordgo.Message, error) {
 	startTime := time.Now()
-	
+
 	// Increment total requests counter
 	atomic.AddInt64(&do.metrics.TotalRequests, 1)
 
@@ -190,7 +190,7 @@ func (do *DiscordOptimizer) recordLatency(latencyMs int64) {
 	// Update average latency calculation
 	do.metrics.lastLatencySum += latencyMs
 	do.metrics.lastLatencyCount++
-	
+
 	// Calculate rolling average
 	if do.metrics.lastLatencyCount > 0 {
 		do.metrics.AverageLatency = do.metrics.lastLatencySum / do.metrics.lastLatencyCount
@@ -208,7 +208,7 @@ func (do *DiscordOptimizer) GetMetrics() DiscordMetrics {
 func (do *DiscordOptimizer) ResetMetrics() {
 	do.mutex.Lock()
 	defer do.mutex.Unlock()
-	
+
 	do.metrics = &DiscordMetrics{
 		MinLatency: 999999,
 	}
@@ -217,12 +217,12 @@ func (do *DiscordOptimizer) ResetMetrics() {
 // LogPerformanceMetrics logs current performance metrics
 func (do *DiscordOptimizer) LogPerformanceMetrics() {
 	metrics := do.GetMetrics()
-	
+
 	if metrics.TotalRequests > 0 {
 		successRate := float64(metrics.SuccessfulReqs) / float64(metrics.TotalRequests) * 100
 		timeoutRate := float64(metrics.TimeoutRequests) / float64(metrics.TotalRequests) * 100
-		
-		BotLogf("DISCORD_PERF", 
+
+		BotLogf("DISCORD_PERF",
 			"Discord API Performance: Total=%d, Success=%.1f%%, Timeout=%.1f%%, AvgLatency=%dms, MaxLatency=%dms, MinLatency=%dms",
 			metrics.TotalRequests,
 			successRate,

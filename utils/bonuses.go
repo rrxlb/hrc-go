@@ -17,6 +17,7 @@ const (
 	BonusWeekly  BonusType = "weekly"
 	BonusSpecial BonusType = "special"
 	BonusVote    BonusType = "vote"
+	BonusServer  BonusType = "server"
 )
 
 // BonusInfo contains information about a bonus
@@ -46,30 +47,35 @@ const (
 	BaseDailyBonus  = 150 // 150 chips per day (matches Python)
 	BaseWeeklyBonus = 600 // 600 chips per week (matches Python)
 	BaseVoteBonus   = 250 // 250 chips per vote (matches Python)
+	BaseServerBonus = 500 // 500 chips per server bonus
 
 	// Prestige bonus amounts (per prestige level)
 	PrestigeBonusHourly = 50   // 50 chips per prestige level for hourly
 	PrestigeBonusDaily  = 350  // 350 chips per prestige level for daily
 	PrestigeBonusWeekly = 1500 // 1500 chips per prestige level for weekly
 	PrestigeBonusVote   = 625  // 625 chips per prestige level for vote
+	PrestigeBonusServer = 1250 // 1250 chips per prestige level for server
 
 	// Level bonus amounts (per level)
 	LevelBonusHourly = 15  // 15 chips per level for hourly
 	LevelBonusDaily  = 75  // 75 chips per level for daily
 	LevelBonusWeekly = 300 // 300 chips per level for weekly
 	LevelBonusVote   = 125 // 125 chips per level for vote
+	LevelBonusServer = 250 // 250 chips per level for server
 
 	// XP rewards
 	HourlyXP = 50   // 50 XP per hourly
 	DailyXP  = 250  // 250 XP per daily
 	WeeklyXP = 1000 // 1000 XP per weekly
 	VoteXP   = 500  // 500 XP per vote
+	ServerXP = 750  // 750 XP per server bonus
 
 	// Cooldown periods
 	HourlyCooldown = time.Hour          // 1 hour
 	DailyCooldown  = 24 * time.Hour     // 24 hours
 	WeeklyCooldown = 7 * 24 * time.Hour // 7 days
 	VoteCooldown   = 12 * time.Hour     // 12 hours (top.gg voting cooldown)
+	ServerCooldown = 24 * time.Hour     // 24 hours (daily server bonus)
 
 	// Bonus multipliers
 	MaxRankMultiplier     = 1.5 // 50% bonus for max rank
@@ -77,11 +83,25 @@ const (
 	MaxPrestigeMultiplier = 2.0 // 200% max bonus from prestige
 )
 
+// Main support server configuration
+const MainSupportServerID = "1396567190102347776" // Discord server where server bonus can be claimed
+
 // BonusManager handles all bonus-related operations
 type BonusManager struct{}
 
 // Global bonus manager
 var BonusMgr = &BonusManager{}
+
+// IsUserInMainSupportServer checks if a user is a member of the main support server
+func IsUserInMainSupportServer(session *discordgo.Session, userID string) bool {
+	if session == nil {
+		return false
+	}
+
+	// Check if user is in the main support server
+	_, err := session.GuildMember(MainSupportServerID, userID)
+	return err == nil
+}
 
 // CanClaimBonus checks if a user can claim a specific bonus type
 func (bm *BonusManager) CanClaimBonus(user *User, bonusType BonusType) *BonusResult {
@@ -101,6 +121,9 @@ func (bm *BonusManager) CanClaimBonus(user *User, bonusType BonusType) *BonusRes
 	case BonusVote:
 		lastClaimed = user.LastVote
 		cooldown = VoteCooldown
+	case BonusServer:
+		lastClaimed = user.LastBonus
+		cooldown = ServerCooldown
 	default:
 		return &BonusResult{
 			Success: false,
@@ -158,6 +181,8 @@ func (bm *BonusManager) ClaimBonusWithNotification(user *User, bonusType BonusTy
 	case BonusVote:
 		updates.LastVote = &now
 		updates.VotesCountIncrement = 1
+	case BonusServer:
+		updates.LastBonus = &now
 	}
 
 	// Apply updates to database and cache
@@ -215,6 +240,12 @@ func (bm *BonusManager) calculateBonusAmount(user *User, bonusType BonusType) *B
 		levelBonus = int64(level) * LevelBonusVote
 		xpAmount = VoteXP
 		cooldown = VoteCooldown
+	case BonusServer:
+		baseAmount = BaseServerBonus
+		prestigeBonus = int64(user.Prestige) * PrestigeBonusServer
+		levelBonus = int64(level) * LevelBonusServer
+		xpAmount = ServerXP
+		cooldown = ServerCooldown
 	}
 
 	// Calculate total amount from Python formula: base + prestige_amount + level_amount
@@ -278,7 +309,7 @@ func (bm *BonusManager) calculateDailyStreakBonus(user *User) int64 {
 func (bm *BonusManager) GetAllCooldowns(user *User) map[BonusType]*BonusResult {
 	cooldowns := make(map[BonusType]*BonusResult)
 
-	bonusTypes := []BonusType{BonusHourly, BonusDaily, BonusWeekly, BonusVote}
+	bonusTypes := []BonusType{BonusHourly, BonusDaily, BonusWeekly, BonusVote, BonusServer}
 
 	for _, bonusType := range bonusTypes {
 		result := bm.CanClaimBonus(user, bonusType)
@@ -291,6 +322,79 @@ func (bm *BonusManager) GetAllCooldowns(user *User) map[BonusType]*BonusResult {
 	}
 
 	return cooldowns
+}
+
+// ClaimAllAvailableBonusesWithGuildCheck claims all available bonuses for a user including server bonus if in main guild
+func (bm *BonusManager) ClaimAllAvailableBonusesWithGuildCheck(user *User, session *discordgo.Session, userID string) ([]*BonusResult, error) {
+	// Exclude vote bonus - it requires separate Top.gg verification via /vote command
+	bonusTypes := []BonusType{BonusHourly, BonusDaily, BonusWeekly}
+
+	// Include server bonus only if user is in main support server
+	if IsUserInMainSupportServer(session, userID) {
+		bonusTypes = append(bonusTypes, BonusServer)
+	}
+
+	var claimedBonuses []*BonusResult
+	var totalChips, totalXP int64
+
+	// First, check which bonuses can be claimed
+	var availableBonuses []BonusType
+	for _, bonusType := range bonusTypes {
+		if result := bm.CanClaimBonus(user, bonusType); result.Success {
+			availableBonuses = append(availableBonuses, bonusType)
+		}
+	}
+
+	if len(availableBonuses) == 0 {
+		return nil, nil // No bonuses available
+	}
+
+	// Calculate total amounts for all available bonuses
+	now := time.Now()
+	updates := UserUpdateData{}
+
+	for _, bonusType := range availableBonuses {
+		bonusInfo := bm.calculateBonusAmount(user, bonusType)
+		totalChips += bonusInfo.ActualAmount
+		totalXP += bonusInfo.XPAmount
+
+		// Set timestamps
+		switch bonusType {
+		case BonusHourly:
+			updates.LastHourly = &now
+		case BonusDaily:
+			updates.LastDaily = &now
+			updates.DailyBonusesClaimedIncrement = 1
+		case BonusWeekly:
+			updates.LastWeekly = &now
+		case BonusVote:
+			updates.LastVote = &now
+			updates.VotesCountIncrement = 1
+		case BonusServer:
+			updates.LastBonus = &now
+		}
+
+		// Add to results
+		bonusInfo.NextAvailable = now.Add(bonusInfo.Cooldown)
+		claimedBonuses = append(claimedBonuses, &BonusResult{
+			Success:   true,
+			BonusInfo: bonusInfo,
+		})
+	}
+
+	// Apply all updates at once
+	updates.ChipsIncrement = totalChips
+	updates.TotalXPIncrement = totalXP
+
+	_, err := UpdateCachedUser(user.UserID, updates)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update user data: %w", err)
+	}
+
+	log.Printf("User %d claimed %d bonuses: %d chips, %d XP total",
+		user.UserID, len(claimedBonuses), totalChips, totalXP)
+
+	return claimedBonuses, nil
 }
 
 // ClaimAllAvailableBonuses claims all available bonuses for a user
@@ -437,6 +541,7 @@ func (bm *BonusManager) CreateCooldownEmbed(user *User) *discordgo.MessageEmbed 
 		BonusDaily:  "📅 Daily Bonus",
 		BonusWeekly: "🗓️ Weekly Bonus",
 		BonusVote:   "🗳️ Vote Bonus",
+		BonusServer: "🏠 High Roller Club",
 	}
 
 	for bonusType, result := range cooldowns {
@@ -447,6 +552,8 @@ func (bm *BonusManager) CreateCooldownEmbed(user *User) *discordgo.MessageEmbed 
 			// Bonus is available - clean format without chip amounts
 			if bonusType == BonusVote {
 				value = "✅ Ready! (Use /vote to claim)"
+			} else if bonusType == BonusServer {
+				value = "✅ Ready! (Use /bonus to claim)"
 			} else {
 				value = "✅ Ready!"
 			}

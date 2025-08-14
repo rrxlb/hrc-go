@@ -128,4 +128,3 @@ func (am *AnimationManager) IsAnimationRunning(id string) bool {
 	_, exists := am.sequences[id]
 	return exists
 }
-
