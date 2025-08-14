@@ -165,16 +165,18 @@ func (bg *BlackjackGame) StartGame() error {
 
 	// Performance logging: Response sending
 	responseStart := time.Now()
+	
+	// Use ultra-fast response pattern for instant Discord feedback
 	var err error
 	if bg.State == StateDeferred {
-		// Interaction was deferred; update the original response
-		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+		// Interaction was deferred; use fastest possible update
+		err = utils.QuickGameResponse(bg.Session, bg.OriginalInteraction, embed, components, "Blackjack")
 		if err == nil {
 			bg.State = StateActive
 		}
 	} else {
-		// No prior response; send initial response now
-		err = utils.SendInteractionResponse(bg.Session, bg.Interaction, embed, components, false)
+		// No prior response; send initial response now (fallback case)
+		err = utils.SendInteractionResponseWithTimeout(bg.Session, bg.Interaction, embed, components, false, 1*time.Second)
 		if err == nil {
 			bg.State = StateActive
 		}
@@ -187,16 +189,21 @@ func (bg *BlackjackGame) StartGame() error {
 		responseDuration.Nanoseconds()/1000000, totalDuration.Nanoseconds()/1000000)
 
 	if err == nil {
-		// Capture original message ID for fallback edits later (async to avoid blocking)
-		go func(sess *discordgo.Session, inter *discordgo.InteractionCreate) {
-			time.Sleep(200 * time.Millisecond)
-			if m2, e2 := utils.GetOriginalResponseMessage(sess, inter); e2 == nil && m2 != nil {
-				bg.ChannelID = m2.ChannelID
-				bg.MessageID = m2.ID
-			}
-		}(bg.Session, bg.Interaction)
+		// Capture original message ID for fallback edits later (non-blocking async)
+		go bg.captureMessageIDAsync()
 	}
 	return err
+}
+
+// captureMessageIDAsync captures the original message ID for fallback edits in a non-blocking way
+func (bg *BlackjackGame) captureMessageIDAsync() {
+	// Brief delay to ensure Discord processed the response
+	time.Sleep(100 * time.Millisecond)
+	
+	if m2, e2 := utils.GetOriginalResponseMessage(bg.Session, bg.Interaction); e2 == nil && m2 != nil {
+		bg.ChannelID = m2.ChannelID
+		bg.MessageID = m2.ID
+	}
 }
 
 // HandleHit handles the player hitting
@@ -379,16 +386,18 @@ func (bg *BlackjackGame) finishNaturalBlackjack() error {
 	return nil
 }
 
-// finishGame completes the game and calculates results
+// finishGame completes the game and calculates results with optimized response timing
 func (bg *BlackjackGame) finishGame() error {
 	// Immediately respond to the interaction to prevent timeout
 	if err := bg.sendDealerPlayingResponse(); err != nil {
 		// Continue even if immediate response fails
+		utils.BotLogf("BLACKJACK", "Failed to send dealer playing response for game %s: %v", bg.GameID, err)
 	}
 
-	// Play dealer hand with animation
+	// Play dealer hand with animation (now non-blocking)
 	if err := bg.playDealerHand(); err != nil {
 		// Continue with game completion even if animation fails
+		utils.BotLogf("BLACKJACK", "Failed to start dealer animation for game %s: %v", bg.GameID, err)
 	}
 
 	// Calculate results for each hand
@@ -459,7 +468,7 @@ func (bg *BlackjackGame) shouldSkipDealerAnimation() bool {
 	return true
 }
 
-// playDealerHand plays the dealer's hand with realistic card-by-card animation
+// playDealerHand plays the dealer's hand with non-blocking realistic animation
 func (bg *BlackjackGame) playDealerHand() error {
 	// Set revealing state to disable player actions
 	bg.State = StateRevealing
@@ -483,39 +492,106 @@ func (bg *BlackjackGame) playDealerHand() error {
 		return nil
 	}
 
-	// Start with hole card reveal animation
-	if err := bg.revealDealerHoleCard(); err != nil {
-		// Continue with instant dealer play as fallback
-		return bg.playDealerHandInstant()
+	// Start dealer hand animation in background to avoid blocking
+	go bg.playDealerHandAsync()
+	
+	// Return immediately - animation continues in background
+	return nil
+}
+
+// playDealerHandAsync handles dealer animation asynchronously using animation manager
+func (bg *BlackjackGame) playDealerHandAsync() {
+	// Create animation frames for smooth dealer card reveals
+	animationID := fmt.Sprintf("dealer_%s", bg.GameID)
+	
+	// Build animation sequence
+	frames := bg.buildDealerAnimationFrames()
+	if len(frames) == 0 {
+		// No animation needed, play instantly
+		bg.playDealerHandInstant()
+		return
 	}
 
-	// Check if dealer already has 17+ after hole card reveal
-	if bg.DealerHand.GetValue() >= utils.DealerStandValue {
-		return nil // Dealer stands, no more cards needed
-	}
-
-	// Animate additional dealer hits
-	cardCount := 0
-	maxCards := 10 // Safety limit to prevent infinite loops
-	for bg.DealerHand.GetValue() < utils.DealerStandValue && cardCount < maxCards {
-		// Brief delay between cards
-		time.Sleep(400 * time.Millisecond)
-
-		// Deal next card
-		newCard := bg.Deck.Deal()
-		bg.DealerHand.AddCard(newCard)
-		cardCount++
-
-		// Update display with new card
-		if err := bg.updateDealerAnimation(); err != nil {
-			// Continue even if display update fails
+	// Ensure we have message info for animation
+	if bg.ChannelID == "" || bg.MessageID == "" {
+		// Wait briefly for message ID to be captured, then try fallback
+		time.Sleep(150 * time.Millisecond)
+		if bg.ChannelID == "" || bg.MessageID == "" {
+			// Fall back to instant play if no message info available
+			bg.playDealerHandInstant()
+			return
 		}
 	}
 
-	if cardCount >= maxCards {
+	// Start smooth animation sequence
+	utils.Animations.StartAnimation(animationID, bg.Session, bg.ChannelID, bg.MessageID, frames)
+}
+
+// buildDealerAnimationFrames creates animation frames for dealer card reveals
+func (bg *BlackjackGame) buildDealerAnimationFrames() []utils.AnimationFrame {
+	var frames []utils.AnimationFrame
+	
+	// Check if any player hands are not busted
+	anyPlayerNotBusted := false
+	for _, hand := range bg.PlayerHands {
+		if !hand.IsBust() {
+			anyPlayerNotBusted = true
+			break
+		}
 	}
 
-	return nil
+	// If all players are busted, no animation needed
+	if !anyPlayerNotBusted {
+		return frames
+	}
+
+	// If all remaining hands are auto-wins, skip animation
+	if bg.shouldSkipDealerAnimation() {
+		return frames
+	}
+
+	// Create a copy of dealer hand for animation simulation
+	animationDealerHand := &utils.Hand{
+		Cards: make([]utils.Card, len(bg.DealerHand.Cards)),
+		Game:  bg.DealerHand.Game,
+	}
+	copy(animationDealerHand.Cards, bg.DealerHand.Cards)
+
+	// Frame 1: Hole card reveal (200ms delay)
+	embed := bg.createGameEmbed(true) // Show dealer cards revealed
+	components := bg.View.DisableAllButtons()
+	frames = append(frames, utils.AnimationFrame{
+		Embed:      embed,
+		Components: components,
+		Delay:      200 * time.Millisecond,
+	})
+
+	// If dealer already has 17+, no more cards needed
+	if animationDealerHand.GetValue() >= utils.DealerStandValue {
+		return frames
+	}
+
+	// Simulate dealer hits and create frames
+	cardCount := 0
+	maxCards := 10
+	for animationDealerHand.GetValue() < utils.DealerStandValue && cardCount < maxCards {
+		// Deal next card to animation hand
+		newCard := bg.Deck.Deal()
+		bg.DealerHand.AddCard(newCard) // Update real dealer hand
+		animationDealerHand.AddCard(newCard)
+		cardCount++
+
+		// Create frame for this new card (400ms delay between hits)
+		embed := bg.createGameEmbed(true)
+		components := bg.View.DisableAllButtons()
+		frames = append(frames, utils.AnimationFrame{
+			Embed:      embed,
+			Components: components,
+			Delay:      400 * time.Millisecond,
+		})
+	}
+
+	return frames
 }
 
 // sendDealerPlayingResponse immediately responds to the interaction with dealer playing state
@@ -526,11 +602,11 @@ func (bg *BlackjackGame) sendDealerPlayingResponse() error {
 
 	var err error
 	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-		// Component interaction - send immediate update
-		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+		// Component interaction - send immediate update with timeout
+		err = utils.UpdateComponentInteractionWithTimeout(bg.Session, bg.Interaction, embed, components, 2*time.Second)
 	} else {
-		// Update deferred response (shouldn't happen in finishGame, but handle gracefully)
-		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+		// Update deferred response with timeout (shouldn't happen in finishGame, but handle gracefully)
+		err = utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 2*time.Second)
 	}
 
 	// If update fails, try fallback edit
@@ -569,8 +645,8 @@ func (bg *BlackjackGame) updateDealerAnimation() error {
 
 // revealDealerHoleCard reveals the dealer's hole card with animation
 func (bg *BlackjackGame) revealDealerHoleCard() error {
-	// Quick pause before revealing hole card
-	time.Sleep(300 * time.Millisecond)
+	// Quick pause before revealing hole card (now async-safe)
+	time.Sleep(200 * time.Millisecond)
 
 	// Update the game state to show the hole card using fallback edit
 	return bg.updateDealerAnimation()
@@ -670,7 +746,7 @@ func (bg *BlackjackGame) updateViewOptions() {
 	}
 }
 
-// updateGameState updates the game state display
+// updateGameState updates the game state display with optimized Discord calls
 func (bg *BlackjackGame) updateGameState() error {
 	// Skip update if game is finished
 	if bg.State == StateFinished {
@@ -682,11 +758,11 @@ func (bg *BlackjackGame) updateGameState() error {
 
 	var err error
 	if bg.Interaction.Type == discordgo.InteractionMessageComponent {
-		// Component interactions need immediate response
-		err = utils.UpdateComponentInteraction(bg.Session, bg.Interaction, embed, components)
+		// Component interactions need immediate response with timeout
+		err = utils.UpdateComponentInteractionWithTimeout(bg.Session, bg.Interaction, embed, components, 3*time.Second)
 	} else {
-		// Update the deferred response
-		err = utils.UpdateInteractionResponse(bg.Session, bg.OriginalInteraction, embed, components)
+		// Update the deferred response with timeout
+		err = utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 3*time.Second)
 	}
 
 	// If update fails, try fallback edit via channel message
@@ -1039,17 +1115,19 @@ func HandleBlackjackInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 
 }
 
-// isWebhookExpired checks for Discord webhook expiration errors
+// isWebhookExpired checks for Discord webhook expiration errors using fast-fail pattern
 func (bg *BlackjackGame) isWebhookExpired(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "Unknown Webhook") || strings.Contains(msg, "\"code\": 10015") || strings.Contains(msg, "404")
+	return utils.IsWebhookExpired(err)
 }
 
 // fallbackEdit attempts to update the message via channel edit when webhook expired
 func (bg *BlackjackGame) fallbackEdit(embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
+	// Check circuit breaker first - fast fail if too many recent failures
+	if !utils.WebhookCircuitBreaker.CanExecute() {
+		utils.BotLogf("BLACKJACK", "Fallback edit blocked by circuit breaker for game %s", bg.GameID)
+		return fmt.Errorf("fallback edit circuit breaker open")
+	}
+
 	// Ensure we have IDs; try to pull from current interaction message as last resort
 	if bg.ChannelID == "" || bg.MessageID == "" {
 		if bg.Interaction != nil && bg.Interaction.Message != nil {
@@ -1057,13 +1135,40 @@ func (bg *BlackjackGame) fallbackEdit(embed *discordgo.MessageEmbed, components 
 			bg.MessageID = bg.Interaction.Message.ID
 		}
 	}
+	
 	if bg.ChannelID == "" || bg.MessageID == "" {
+		utils.WebhookCircuitBreaker.RecordFailure()
 		return fmt.Errorf("missing message/channel id for fallback edit")
 	}
+
+	// Perform channel edit with timeout
 	embeds := []*discordgo.MessageEmbed{embed}
 	edit := &discordgo.MessageEdit{ID: bg.MessageID, Channel: bg.ChannelID, Embeds: &embeds, Components: &components}
-	_, err := bg.Session.ChannelMessageEditComplex(edit)
-	return err
+	
+	// Add timeout to channel edit
+	type result struct {
+		msg *discordgo.Message
+		err error
+	}
+	resultChan := make(chan result, 1)
+
+	go func() {
+		msg, err := bg.Session.ChannelMessageEditComplex(edit)
+		resultChan <- result{msg, err}
+	}()
+
+	select {
+	case res := <-resultChan:
+		if res.err != nil {
+			utils.WebhookCircuitBreaker.RecordFailure()
+			return res.err
+		}
+		utils.WebhookCircuitBreaker.RecordSuccess()
+		return nil
+	case <-time.After(3 * time.Second):
+		utils.WebhookCircuitBreaker.RecordFailure()
+		return fmt.Errorf("fallback edit timeout after 3s")
+	}
 }
 
 // Helper functions

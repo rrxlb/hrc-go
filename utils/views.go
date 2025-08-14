@@ -3,6 +3,8 @@ package utils
 import (
 	"fmt"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -285,6 +287,12 @@ func PaginationView(prevID, nextID string, currentPage, totalPages int) []discor
 
 // SendInteractionResponse sends an interaction response with embed and components
 func SendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, ephemeral bool) error {
+	// Use optimized send with timeout
+	return SendInteractionResponseWithTimeout(s, i, embed, components, ephemeral, 5*time.Second)
+}
+
+// SendInteractionResponseWithTimeout sends an interaction response with timeout control and optimization
+func SendInteractionResponseWithTimeout(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, ephemeral bool, timeout time.Duration) error {
 	data := &discordgo.InteractionResponseData{
 		Embeds:     []*discordgo.MessageEmbed{embed},
 		Components: components,
@@ -298,18 +306,25 @@ func SendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreat
 		Data: data,
 	}
 
-	err := s.InteractionRespond(i.Interaction, response)
-	return err
+	// Use optimized Discord API call with performance monitoring
+	return DiscordOpt.OptimizedInteractionRespond(s, i.Interaction, response, timeout)
 }
 
 // UpdateInteractionResponse updates an interaction response with new embed and components
 func UpdateInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
+	// Use optimized update with timeout
+	return UpdateInteractionResponseWithTimeout(s, i, embed, components, 5*time.Second)
+}
+
+// UpdateInteractionResponseWithTimeout updates an interaction response with timeout control and optimization
+func UpdateInteractionResponseWithTimeout(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, timeout time.Duration) error {
 	edit := &discordgo.WebhookEdit{
 		Embeds:     &[]*discordgo.MessageEmbed{embed},
 		Components: &components,
 	}
 
-	_, err := s.InteractionResponseEdit(i.Interaction, edit)
+	// Use optimized Discord API call with performance monitoring
+	_, err := DiscordOpt.OptimizedInteractionResponseEdit(s, i.Interaction, edit, timeout)
 	return err
 }
 
@@ -345,6 +360,12 @@ func DeferInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCrea
 
 // UpdateComponentInteraction updates a component interaction
 func UpdateComponentInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
+	// Use optimized update with timeout
+	return UpdateComponentInteractionWithTimeout(s, i, embed, components, 5*time.Second)
+}
+
+// UpdateComponentInteractionWithTimeout updates a component interaction with timeout control and optimization
+func UpdateComponentInteractionWithTimeout(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, timeout time.Duration) error {
 	response := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
@@ -353,7 +374,8 @@ func UpdateComponentInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		},
 	}
 
-	return s.InteractionRespond(i.Interaction, response)
+	// Use optimized Discord API call with performance monitoring
+	return DiscordOpt.OptimizedInteractionRespond(s, i.Interaction, response, timeout)
 }
 
 // AcknowledgeComponentInteraction acknowledges a component interaction without updating the message
@@ -408,4 +430,190 @@ func TryEphemeralFollowup(s *discordgo.Session, i *discordgo.InteractionCreate, 
 	params := &discordgo.WebhookParams{Content: content, Flags: discordgo.MessageFlagsEphemeral}
 	_, err := s.FollowupMessageCreate(i.Interaction, true, params)
 	return err
+}
+
+// IsDiscordAPIError checks if an error is a Discord API error and returns error details
+func IsDiscordAPIError(err error) (isDiscordError bool, code int, message string) {
+	if err == nil {
+		return false, 0, ""
+	}
+
+	if restErr, ok := err.(*discordgo.RESTError); ok {
+		return true, restErr.Message.Code, restErr.Message.Message
+	}
+
+	return false, 0, err.Error()
+}
+
+// IsWebhookExpired checks for expired webhook tokens (fast-fail pattern)
+func IsWebhookExpired(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Fast string checks for webhook expiration
+	errMsg := err.Error()
+	return errMsg == "Unknown Webhook" || 
+		   errMsg == "The provided webhook does not exist." ||
+		   ContainsAny(errMsg, []string{
+			   "\"code\": 10015", // Unknown Webhook
+			   "\"code\":10015",  // Unknown Webhook (no space)
+			   "404",             // Not Found
+			   "token is invalid",
+		   })
+}
+
+// ContainsAny checks if a string contains any of the provided substrings
+func ContainsAny(s string, substrings []string) bool {
+	for _, substr := range substrings {
+		if strings.Contains(s, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsRateLimited checks if error indicates rate limiting
+func IsRateLimited(err error) (bool, time.Duration) {
+	if err == nil {
+		return false, 0
+	}
+
+	isDiscord, code, _ := IsDiscordAPIError(err)
+	if isDiscord && code == 429 { // Too Many Requests
+		// Return suggested retry delay (simplified to 1 second)
+		return true, 1 * time.Second
+	}
+
+	return false, 0
+}
+
+// CircuitBreaker implements fast-fail pattern for Discord API calls
+type CircuitBreaker struct {
+	maxFailures    int
+	resetTimeout   time.Duration
+	failureCount   int
+	lastFailure    time.Time
+	state          string // "closed", "open", "half-open"
+	mutex          sync.RWMutex
+}
+
+// NewCircuitBreaker creates a new circuit breaker
+func NewCircuitBreaker(maxFailures int, resetTimeout time.Duration) *CircuitBreaker {
+	return &CircuitBreaker{
+		maxFailures:  maxFailures,
+		resetTimeout: resetTimeout,
+		state:        "closed",
+	}
+}
+
+// CanExecute checks if the circuit breaker allows execution
+func (cb *CircuitBreaker) CanExecute() bool {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+
+	if cb.state == "closed" {
+		return true
+	}
+
+	if cb.state == "open" {
+		// Check if we should transition to half-open
+		if time.Since(cb.lastFailure) >= cb.resetTimeout {
+			cb.state = "half-open"
+			return true
+		}
+		return false
+	}
+
+	// half-open state allows one test request
+	return true
+}
+
+// RecordSuccess records a successful operation
+func (cb *CircuitBreaker) RecordSuccess() {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+
+	cb.failureCount = 0
+	cb.state = "closed"
+}
+
+// RecordFailure records a failed operation
+func (cb *CircuitBreaker) RecordFailure() {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+
+	cb.failureCount++
+	cb.lastFailure = time.Now()
+
+	if cb.failureCount >= cb.maxFailures {
+		cb.state = "open"
+	}
+}
+
+// Global circuit breakers for different Discord API operations
+var (
+	InteractionCircuitBreaker = NewCircuitBreaker(5, 30*time.Second) // 5 failures, 30s reset
+	WebhookCircuitBreaker     = NewCircuitBreaker(3, 15*time.Second) // 3 failures, 15s reset
+)
+
+// FastUpdateInteractionResponse provides immediate response for time-sensitive operations
+// Returns a channel that will receive the actual update result asynchronously
+func FastUpdateInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) <-chan error {
+	resultChan := make(chan error, 1)
+	
+	// Execute Discord API call asynchronously
+	go func() {
+		defer close(resultChan)
+		err := UpdateInteractionResponseWithTimeout(s, i, embed, components, 3*time.Second)
+		resultChan <- err
+	}()
+	
+	return resultChan
+}
+
+// ImmediateResponsePattern sends a basic response immediately, then updates with full content
+// This pattern eliminates "Bot is thinking..." by ensuring Discord gets a response quickly
+func ImmediateResponsePattern(s *discordgo.Session, i *discordgo.InteractionCreate, fullEmbed *discordgo.MessageEmbed, fullComponents []discordgo.MessageComponent) error {
+	// Send minimal immediate response to prevent "Bot is thinking..."
+	loadingEmbed := &discordgo.MessageEmbed{
+		Title: "🎮 Starting Game...",
+		Color: 0x7289DA, // Discord blue
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Loading game state...",
+		},
+	}
+	
+	// Send immediate response
+	err := SendInteractionResponseWithTimeout(s, i, loadingEmbed, nil, false, 1*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to send immediate response: %w", err)
+	}
+	
+	// Update with full content asynchronously (non-blocking)
+	go func() {
+		// Brief delay to ensure Discord processed the first response
+		time.Sleep(50 * time.Millisecond)
+		
+		// Update with full game content
+		updateErr := UpdateInteractionResponseWithTimeout(s, i, fullEmbed, fullComponents, 3*time.Second)
+		if updateErr != nil {
+			BotLogf("DISCORD_API", "Failed to update with full content: %v", updateErr)
+		}
+	}()
+	
+	return nil
+}
+
+// OptimizedGameStart provides the fastest possible game start response pattern
+// Specifically designed for game commands that need immediate feedback
+func OptimizedGameStart(s *discordgo.Session, i *discordgo.InteractionCreate, gameEmbed *discordgo.MessageEmbed, gameComponents []discordgo.MessageComponent) error {
+	// For deferred interactions, update immediately without intermediate loading
+	if i.Type == discordgo.InteractionApplicationCommand {
+		// This is a deferred slash command - update directly
+		return UpdateInteractionResponseWithTimeout(s, i, gameEmbed, gameComponents, 2*time.Second)
+	}
+	
+	// For component interactions, use immediate update
+	return UpdateComponentInteractionWithTimeout(s, i, gameEmbed, gameComponents, 2*time.Second)
 }
