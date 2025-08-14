@@ -171,49 +171,38 @@ func (am *AchievementManager) createAchievementsTable() error {
 func (am *AchievementManager) loadDefaultAchievements() {
 	defaultAchievements := []*Achievement{
 		// First Steps (1-5)
-		{ID: 1, Name: "Welcome to the Casino", Description: "Join the casino and start your gambling journey", Icon: "🎰", Category: string(CategoryFirstSteps), RequirementType: string(RequirementSpecial), RequirementValue: 0, ChipsReward: 100, XPReward: 50, Hidden: false},
-		{ID: 2, Name: "First Win", Description: "Win your first game", Icon: "🏆", Category: string(CategoryFirstSteps), RequirementType: string(RequirementWins), RequirementValue: 1, ChipsReward: 200, XPReward: 100, Hidden: false},
-		{ID: 3, Name: "Getting Started", Description: "Play 5 games", Icon: "🎯", Category: string(CategoryFirstSteps), RequirementType: string(RequirementGamesPlayed), RequirementValue: 5, ChipsReward: 300, XPReward: 150, Hidden: false},
-		{ID: 4, Name: "Daily Visitor", Description: "Claim your first daily bonus", Icon: "📅", Category: string(CategoryFirstSteps), RequirementType: string(RequirementDailyBonuses), RequirementValue: 1, ChipsReward: 250, XPReward: 100, Hidden: false},
-		{ID: 5, Name: "Voter", Description: "Vote for the bot", Icon: "🗳️", Category: string(CategoryFirstSteps), RequirementType: string(RequirementVotes), RequirementValue: 1, ChipsReward: 500, XPReward: 200, Hidden: false},
+		{ID: 1, Name: "First Blood", Description: "Win your first game", Icon: "🎯", Category: string(CategoryFirstSteps), RequirementType: string(RequirementWins), RequirementValue: 1, ChipsReward: 500, XPReward: 100, Hidden: false},
+		{ID: 2, Name: "Getting Started", Description: "Reach 5,000 chips", Icon: "💰", Category: string(CategoryFirstSteps), RequirementType: string(RequirementChips), RequirementValue: 5000, ChipsReward: 1000, XPReward: 250, Hidden: false},
+		{ID: 3, Name: "Beginner's Luck", Description: "Win 10 games", Icon: "🍀", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 10, ChipsReward: 1500, XPReward: 500, Hidden: false},
+		{ID: 4, Name: "Lucky Streak", Description: "Win 50 games", Icon: "🏅", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 50, ChipsReward: 5000, XPReward: 1500, Hidden: false},
+		{ID: 5, Name: "Seasoned Player", Description: "Win 100 games", Icon: "🎲", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 100, ChipsReward: 10000, XPReward: 3000, Hidden: false},
+		{ID: 6, Name: "Gambling Master", Description: "Win 500 games", Icon: "👑", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 500, ChipsReward: 25000, XPReward: 7500, Hidden: false},
+		{ID: 7, Name: "Small Fortune", Description: "Accumulate 25,000 chips", Icon: "💎", Category: string(CategoryWealth), RequirementType: string(RequirementChips), RequirementValue: 25000, ChipsReward: 5000, XPReward: 1000, Hidden: false},
+		{ID: 8, Name: "Big Money", Description: "Accumulate 100,000 chips", Icon: "💸", Category: string(CategoryWealth), RequirementType: string(RequirementChips), RequirementValue: 100000, ChipsReward: 15000, XPReward: 2500, Hidden: false},
+		{ID: 9, Name: "Millionaire", Description: "Accumulate 1,000,000 chips", Icon: "🏰", Category: string(CategoryWealth), RequirementType: string(RequirementChips), RequirementValue: 1000000, ChipsReward: 100000, XPReward: 10000, Hidden: false},
+		{ID: 10, Name: "Rising Star", Description: "Reach 10,000 total XP", Icon: "⭐", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 10000, ChipsReward: 2500, XPReward: 500, Hidden: false},
+		{ID: 11, Name: "Veteran", Description: "Reach 100,000 total XP", Icon: "🏅", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 100000, ChipsReward: 15000, XPReward: 2500, Hidden: false},
+		{ID: 12, Name: "Legend", Description: "Reach 500,000 total XP", Icon: "🌟", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 500000, ChipsReward: 50000, XPReward: 7500, Hidden: false},
+		{ID: 13, Name: "Fresh Start", Description: "Reach Prestige Level 1", Icon: "🔄", Category: string(CategoryPrestige), RequirementType: string(RequirementPrestige), RequirementValue: 1, ChipsReward: 10000, XPReward: 5000, Hidden: false},
+		{ID: 14, Name: "Second Wind", Description: "Reach Prestige Level 3", Icon: "🌪️", Category: string(CategoryPrestige), RequirementType: string(RequirementPrestige), RequirementValue: 3, ChipsReward: 25000, XPReward: 15000, Hidden: false},
+		{ID: 15, Name: "Prestige Master", Description: "Reach Prestige Level 5", Icon: "👑", Category: string(CategoryPrestige), RequirementType: string(RequirementPrestige), RequirementValue: 5, ChipsReward: 100000, XPReward: 50000, Hidden: true},
+		{ID: 16, Name: "Century Club", Description: "Play 100 total games", Icon: "💯", Category: string(CategoryGaming), RequirementType: string(RequirementGamesPlayed), RequirementValue: 100, ChipsReward: 7500, XPReward: 2000, Hidden: false},
+		{ID: 17, Name: "Dedication", Description: "Play 500 total games", Icon: "🎮", Category: string(CategoryGaming), RequirementType: string(RequirementGamesPlayed), RequirementValue: 500, ChipsReward: 20000, XPReward: 5000, Hidden: false},
+		{ID: 18, Name: "Addiction", Description: "Play 1,000 total games", Icon: "🎪", Category: string(CategoryGaming), RequirementType: string(RequirementGamesPlayed), RequirementValue: 1000, ChipsReward: 50000, XPReward: 15000, Hidden: false},
+		{ID: 19, Name: "Big Winner", Description: "Win 50,000 chips in a single game", Icon: "💸", Category: string(CategorySpecial), RequirementType: string(RequirementSpecial), RequirementValue: 50000, ChipsReward: 25000, XPReward: 10000, Hidden: false},
+		{ID: 20, Name: "Whale", Description: "Win 100,000 chips in a single game", Icon: "🐋", Category: string(CategorySpecial), RequirementType: string(RequirementSpecial), RequirementValue: 100000, ChipsReward: 100000, XPReward: 25000, Hidden: false},
+		{ID: 21, Name: "Regular Visitor", Description: "Claim 50 daily bonuses", Icon: "📅", Category: string(CategoryLoyalty), RequirementType: string(RequirementDailyBonuses), RequirementValue: 50, ChipsReward: 15000, XPReward: 5000, Hidden: false},
+		{ID: 22, Name: "Supporter", Description: "Vote for the bot 25 times", Icon: "💝", Category: string(CategoryLoyalty), RequirementType: string(RequirementVotes), RequirementValue: 25, ChipsReward: 10000, XPReward: 3000, Hidden: false},
 
-		// Wins (6-15)
-		{ID: 6, Name: "Lucky Streak", Description: "Win 10 games", Icon: "🍀", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 10, ChipsReward: 1000, XPReward: 500, Hidden: false},
-		{ID: 7, Name: "Winner", Description: "Win 25 games", Icon: "🏅", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 25, ChipsReward: 2000, XPReward: 1000, Hidden: false},
-		{ID: 8, Name: "Champion", Description: "Win 50 games", Icon: "🏆", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 50, ChipsReward: 5000, XPReward: 2500, Hidden: false},
-		{ID: 9, Name: "Dominator", Description: "Win 100 games", Icon: "👑", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 100, ChipsReward: 10000, XPReward: 5000, Hidden: false},
-		{ID: 10, Name: "Unstoppable", Description: "Win 250 games", Icon: "🔥", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 250, ChipsReward: 25000, XPReward: 12500, Hidden: false},
-
-		// Wealth (11-20)
-		{ID: 11, Name: "First Thousand", Description: "Accumulate 1,000 chips", Icon: "💰", Category: string(CategoryWealth), RequirementType: string(RequirementChips), RequirementValue: 1000, ChipsReward: 500, XPReward: 250, Hidden: false},
-		{ID: 12, Name: "Five Grand", Description: "Accumulate 5,000 chips", Icon: "💎", Category: string(CategoryWealth), RequirementType: string(RequirementChips), RequirementValue: 5000, ChipsReward: 1000, XPReward: 500, Hidden: false},
-		{ID: 13, Name: "Ten Thousand Club", Description: "Accumulate 10,000 chips", Icon: "🏦", Category: string(CategoryWealth), RequirementType: string(RequirementChips), RequirementValue: 10000, ChipsReward: 2000, XPReward: 1000, Hidden: false},
-		{ID: 14, Name: "High Roller", Description: "Accumulate 50,000 chips", Icon: "🎩", Category: string(CategoryWealth), RequirementType: string(RequirementChips), RequirementValue: 50000, ChipsReward: 10000, XPReward: 5000, Hidden: false},
-		{ID: 15, Name: "Millionaire", Description: "Accumulate 1,000,000 chips", Icon: "🏰", Category: string(CategoryWealth), RequirementType: string(RequirementChips), RequirementValue: 1000000, ChipsReward: 100000, XPReward: 50000, Hidden: false},
-
-		// Experience (21-30)
-		{ID: 21, Name: "Novice", Description: "Reach 1,000 XP", Icon: "🥉", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 1000, ChipsReward: 500, XPReward: 0, Hidden: false},
-		{ID: 22, Name: "Apprentice", Description: "Reach 10,000 XP", Icon: "🥈", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 10000, ChipsReward: 2000, XPReward: 0, Hidden: false},
-		{ID: 23, Name: "Gambler", Description: "Reach 40,000 XP", Icon: "🥇", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 40000, ChipsReward: 5000, XPReward: 0, Hidden: false},
-		{ID: 24, Name: "Card Shark", Description: "Reach 350,000 XP", Icon: "🦈", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 350000, ChipsReward: 50000, XPReward: 0, Hidden: false},
-		{ID: 25, Name: "Legend", Description: "Reach 2,000,000 XP", Icon: "🌟", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 2000000, ChipsReward: 200000, XPReward: 0, Hidden: false},
-
-		// Loyalty (31-40)
-		{ID: 31, Name: "Regular", Description: "Claim 7 daily bonuses", Icon: "📆", Category: string(CategoryLoyalty), RequirementType: string(RequirementDailyBonuses), RequirementValue: 7, ChipsReward: 1000, XPReward: 500, Hidden: false},
-		{ID: 32, Name: "Dedicated", Description: "Claim 30 daily bonuses", Icon: "🗓️", Category: string(CategoryLoyalty), RequirementType: string(RequirementDailyBonuses), RequirementValue: 30, ChipsReward: 5000, XPReward: 2500, Hidden: false},
-		{ID: 33, Name: "Loyal Customer", Description: "Claim 100 daily bonuses", Icon: "🎖️", Category: string(CategoryLoyalty), RequirementType: string(RequirementDailyBonuses), RequirementValue: 100, ChipsReward: 15000, XPReward: 7500, Hidden: false},
-		{ID: 34, Name: "Supporter", Description: "Vote 10 times", Icon: "❤️", Category: string(CategoryLoyalty), RequirementType: string(RequirementVotes), RequirementValue: 10, ChipsReward: 5000, XPReward: 2500, Hidden: false},
-		{ID: 35, Name: "True Fan", Description: "Vote 50 times", Icon: "⭐", Category: string(CategoryLoyalty), RequirementType: string(RequirementVotes), RequirementValue: 50, ChipsReward: 25000, XPReward: 12500, Hidden: false},
-
-		// Gaming (41-50)
-		{ID: 41, Name: "Casual Player", Description: "Play 50 games", Icon: "🎮", Category: string(CategoryGaming), RequirementType: string(RequirementGamesPlayed), RequirementValue: 50, ChipsReward: 2500, XPReward: 1250, Hidden: false},
-		{ID: 42, Name: "Active Gambler", Description: "Play 200 games", Icon: "🎯", Category: string(CategoryGaming), RequirementType: string(RequirementGamesPlayed), RequirementValue: 200, ChipsReward: 7500, XPReward: 3750, Hidden: false},
-		{ID: 43, Name: "Veteran", Description: "Play 500 games", Icon: "🎪", Category: string(CategoryGaming), RequirementType: string(RequirementGamesPlayed), RequirementValue: 500, ChipsReward: 20000, XPReward: 10000, Hidden: false},
-		{ID: 44, Name: "Addict", Description: "Play 1000 games", Icon: "🎡", Category: string(CategoryGaming), RequirementType: string(RequirementGamesPlayed), RequirementValue: 1000, ChipsReward: 50000, XPReward: 25000, Hidden: false},
-
-		// Special Hidden Achievements (51-52)
-		{ID: 51, Name: "Lucky Number", Description: "Win with exactly 777 chips", Icon: "🍀", Category: string(CategorySpecial), RequirementType: string(RequirementSpecial), RequirementValue: 777, ChipsReward: 7777, XPReward: 3888, Hidden: true},
-		{ID: 52, Name: "High Stakes", Description: "Win a bet of 100,000+ chips", Icon: "💸", Category: string(CategorySpecial), RequirementType: string(RequirementSpecial), RequirementValue: 100000, ChipsReward: 200000, XPReward: 100000, Hidden: true},
+		// Additional achievements from CSV to reach the full set
+		{ID: 274, Name: "Novice", Description: "Reach 1,000 total XP", Icon: "🥉", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 1000, ChipsReward: 500, XPReward: 100, Hidden: false},
+		{ID: 275, Name: "Learner", Description: "Reach 5,000 total XP", Icon: "📚", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 5000, ChipsReward: 1500, XPReward: 300, Hidden: false},
+		{ID: 277, Name: "Adept", Description: "Reach 25,000 total XP", Icon: "⚡", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 25000, ChipsReward: 4000, XPReward: 800, Hidden: false},
+		{ID: 278, Name: "Skilled", Description: "Reach 50,000 total XP", Icon: "🧠", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 50000, ChipsReward: 6000, XPReward: 1500, Hidden: false},
+		{ID: 280, Name: "Elite", Description: "Reach 250,000 total XP", Icon: "💠", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 250000, ChipsReward: 20000, XPReward: 4000, Hidden: false},
+		{ID: 282, Name: "Mythic", Description: "Reach 1,000,000 total XP", Icon: "🔮", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 1000000, ChipsReward: 80000, XPReward: 15000, Hidden: false},
+		{ID: 283, Name: "Ascendant", Description: "Reach 2,500,000 total XP", Icon: "🚀", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 2500000, ChipsReward: 150000, XPReward: 40000, Hidden: false},
+		{ID: 284, Name: "Transcendent", Description: "Reach 5,000,000 total XP", Icon: "🌌", Category: string(CategoryExperience), RequirementType: string(RequirementTotalXP), RequirementValue: 5000000, ChipsReward: 300000, XPReward: 80000, Hidden: true},
 	}
 
 	am.mutex.Lock()

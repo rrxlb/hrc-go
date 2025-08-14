@@ -11,6 +11,7 @@ type Achievement struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	Icon        string    `json:"icon"`
+	Category    string    `json:"category"`
 	Type        string    `json:"achievement_type"`
 	TargetValue int       `json:"target_value"`
 	ChipsReward int64     `json:"chips_reward"`
@@ -31,6 +32,7 @@ type UserAchievement struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Icon        string `json:"icon"`
+	Category    string `json:"category"`
 	Type        string `json:"achievement_type"`
 	TargetValue int    `json:"target_value"`
 	ChipsReward int64  `json:"chips_reward"`

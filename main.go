@@ -262,6 +262,10 @@ func registerSlashCommands(s *discordgo.Session) error {
 			Description: "Reset your rank to gain a prestige level",
 		},
 		{
+			Name:        "achievements",
+			Description: "View all available achievements with categories and progress",
+		},
+		{
 			Name:        "leaderboard",
 			Description: "View the server leaderboards",
 			Options: []*discordgo.ApplicationCommandOption{
@@ -372,6 +376,8 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			handleLeaderboardCommand(s, i)
 		case "prestige":
 			handlePrestigeCommand(s, i)
+		case "achievements":
+			handleAchievementsCommand(s, i)
 		case "premium":
 			handlePremiumCommand(s, i)
 		case "addchips":
@@ -473,6 +479,10 @@ func onButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	if strings.HasPrefix(customID, "profile_achievements_") {
 		handleProfileAchievementsButton(s, i)
+	}
+
+	if strings.HasPrefix(customID, "achievements_") {
+		handleAchievementsButton(s, i)
 	}
 }
 
@@ -1243,6 +1253,216 @@ func handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 func handleVoteButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// For future use if we need specific vote button interactions
 	// Currently, the vote button is a link button that opens Top.gg directly
+}
+
+// Achievement command handlers
+func handleAchievementsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	userID := i.Member.User.ID
+	if i.User != nil {
+		userID = i.User.ID
+	}
+
+	// Convert string ID to int64
+	uid, err := strconv.ParseInt(userID, 10, 64)
+	if err != nil {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ Error: Invalid user ID.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	// Get categorized achievements
+	categorized, err := utils.GetCategorizedAchievements(uid)
+	if err != nil {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: fmt.Sprintf("❌ Error loading achievements: %v", err),
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	if len(categorized) == 0 {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ No achievements available at this time.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	// Create overview embed
+	embed := utils.CreateAchievementOverviewEmbed(categorized, uid)
+	buttons := utils.CreateAchievementButtons("", 0, 0, uid, true)
+
+	response := &discordgo.InteractionResponseData{
+		Embeds:     []*discordgo.MessageEmbed{embed},
+		Components: buttons,
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: response,
+	})
+
+	// Auto-disable buttons after 5 minutes
+	go func() {
+		time.Sleep(5 * time.Minute)
+
+		// Create disabled buttons
+		var disabledComponents []discordgo.MessageComponent
+		for _, component := range buttons {
+			if actionRow, ok := component.(discordgo.ActionsRow); ok {
+				var disabledButtons []discordgo.MessageComponent
+				for _, button := range actionRow.Components {
+					if btn, ok := button.(discordgo.Button); ok {
+						btn.Disabled = true
+						disabledButtons = append(disabledButtons, btn)
+					}
+				}
+				disabledComponents = append(disabledComponents, discordgo.ActionsRow{Components: disabledButtons})
+			}
+		}
+
+		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Components: &disabledComponents,
+		})
+	}()
+}
+
+// Helper function to send ephemeral error responses
+func sendEphemeralError(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: "❌ " + message,
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
+func handleAchievementsButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	customID := i.MessageComponentData().CustomID
+	parts := strings.Split(customID, "_")
+
+	if len(parts) < 3 {
+		sendEphemeralError(s, i, "Error: Invalid button data.")
+		return
+	}
+
+	// Extract user ID from the end of custom ID
+	userIDStr := parts[len(parts)-1]
+	targetUserID, err := strconv.ParseInt(userIDStr, 10, 64)
+	if err != nil {
+		sendEphemeralError(s, i, "Error: Invalid user ID.")
+		return
+	}
+
+	// Check if the person clicking the button is the same as the target user
+	clickerID := i.Member.User.ID
+	if i.User != nil {
+		clickerID = i.User.ID
+	}
+
+	clickerIDInt, err := strconv.ParseInt(clickerID, 10, 64)
+	if err != nil {
+		sendEphemeralError(s, i, "Error: Invalid user ID.")
+		return
+	}
+
+	if clickerIDInt != targetUserID {
+		sendEphemeralError(s, i, "You can only view your own achievements.")
+		return
+	}
+
+	// Get categorized achievements
+	categorized, err := utils.GetCategorizedAchievements(targetUserID)
+	if err != nil {
+		sendEphemeralError(s, i, fmt.Sprintf("Error loading achievements: %v", err))
+		return
+	}
+
+	var embed *discordgo.MessageEmbed
+	var buttons []discordgo.MessageComponent
+
+	if strings.HasPrefix(customID, "achievements_overview_") {
+		// Back to overview
+		embed = utils.CreateAchievementOverviewEmbed(categorized, targetUserID)
+		buttons = utils.CreateAchievementButtons("", 0, 0, targetUserID, true)
+	} else if strings.HasPrefix(customID, "achievements_category_") {
+		// Category view
+		if len(parts) < 4 {
+			sendEphemeralError(s, i, "Error: Invalid category data.")
+			return
+		}
+
+		categoryStr := parts[2]
+		category := utils.AchievementCategory(categoryStr)
+
+		achievements, exists := categorized[category]
+		if !exists || len(achievements) == 0 {
+			sendEphemeralError(s, i, "No achievements found in this category.")
+			return
+		}
+
+		totalPages := (len(achievements) + utils.AchievementsPerPage - 1) / utils.AchievementsPerPage
+		embed = utils.CreateAchievementCategoryEmbed(category, achievements, 0, totalPages, targetUserID)
+		buttons = utils.CreateAchievementButtons(category, 0, totalPages, targetUserID, false)
+	} else if strings.HasPrefix(customID, "achievements_page_") {
+		// Page navigation
+		if len(parts) < 5 {
+			sendEphemeralError(s, i, "Error: Invalid page data.")
+			return
+		}
+
+		categoryStr := parts[2]
+		pageStr := parts[3]
+
+		category := utils.AchievementCategory(categoryStr)
+		page, err := strconv.Atoi(pageStr)
+		if err != nil {
+			sendEphemeralError(s, i, "Error: Invalid page number.")
+			return
+		}
+
+		achievements, exists := categorized[category]
+		if !exists || len(achievements) == 0 {
+			sendEphemeralError(s, i, "No achievements found in this category.")
+			return
+		}
+
+		totalPages := (len(achievements) + utils.AchievementsPerPage - 1) / utils.AchievementsPerPage
+		if page < 0 || page >= totalPages {
+			sendEphemeralError(s, i, "Error: Invalid page number.")
+			return
+		}
+
+		embed = utils.CreateAchievementCategoryEmbed(category, achievements, page, totalPages, targetUserID)
+		buttons = utils.CreateAchievementButtons(category, page, totalPages, targetUserID, false)
+	}
+
+	if embed == nil {
+		sendEphemeralError(s, i, "Error: Unable to create achievement display.")
+		return
+	}
+
+	response := &discordgo.InteractionResponseData{
+		Embeds:     []*discordgo.MessageEmbed{embed},
+		Components: buttons,
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: response,
+	})
 }
 
 // sanitizeToken removes common accidental decorations around a token
