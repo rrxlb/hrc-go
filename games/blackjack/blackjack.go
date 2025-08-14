@@ -123,7 +123,7 @@ func NewBlackjackGame(session *discordgo.Session, interaction *discordgo.Interac
 // StartGame initializes the game and deals initial cards
 func (bg *BlackjackGame) StartGame() error {
 	startGameStart := time.Now()
-	
+
 	// Performance logging: Card dealing
 	dealingStart := time.Now()
 	bg.PlayerHands[0].AddCard(bg.Deck.Deal())
@@ -131,7 +131,7 @@ func (bg *BlackjackGame) StartGame() error {
 	bg.PlayerHands[0].AddCard(bg.Deck.Deal())
 	bg.DealerHand.AddCard(bg.Deck.Deal())
 	dealingDuration := time.Since(dealingStart)
-	
+
 	// Check for natural blackjack
 	playerValue := bg.PlayerHands[0].GetValue()
 	dealerUpCard := bg.DealerHand.Cards[0]
@@ -146,7 +146,7 @@ func (bg *BlackjackGame) StartGame() error {
 		err := bg.finishNaturalBlackjack()
 		naturalDuration := time.Since(naturalStart)
 		totalDuration := time.Since(startGameStart)
-		utils.BotLogf("BLACKJACK_PERF", "Natural blackjack finish for user %d: dealing=%dms, natural=%dms, total=%dms", 
+		utils.BotLogf("BLACKJACK_PERF", "Natural blackjack finish for user %d: dealing=%dms, natural=%dms, total=%dms",
 			bg.UserID, dealingDuration.Nanoseconds()/1000000, naturalDuration.Nanoseconds()/1000000, totalDuration.Nanoseconds()/1000000)
 		return err
 	}
@@ -180,10 +180,10 @@ func (bg *BlackjackGame) StartGame() error {
 		}
 	}
 	responseDuration := time.Since(responseStart)
-	
+
 	totalDuration := time.Since(startGameStart)
-	utils.BotLogf("BLACKJACK_PERF", "StartGame breakdown for user %d: dealing=%dms, embed=%dms, response=%dms, total=%dms", 
-		bg.UserID, dealingDuration.Nanoseconds()/1000000, embedDuration.Nanoseconds()/1000000, 
+	utils.BotLogf("BLACKJACK_PERF", "StartGame breakdown for user %d: dealing=%dms, embed=%dms, response=%dms, total=%dms",
+		bg.UserID, dealingDuration.Nanoseconds()/1000000, embedDuration.Nanoseconds()/1000000,
 		responseDuration.Nanoseconds()/1000000, totalDuration.Nanoseconds()/1000000)
 
 	if err == nil {
@@ -906,7 +906,7 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 		user, err := utils.GetCachedUser(userID)
 		userDataDuration := time.Since(userDataStart)
 		utils.BotLogf("BLACKJACK_PERF", "User data retrieval for user %d: %dms", userID, userDataDuration.Nanoseconds()/1000000)
-		
+
 		if err != nil {
 			respondWithDeferredError(sess, inter, "Failed to get user data")
 			return
@@ -917,7 +917,7 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 		bet, err := utils.ParseBet(betStr, user.Chips)
 		betParseDuration := time.Since(betParseStart)
 		utils.BotLogf("BLACKJACK_PERF", "Bet parsing for user %d, bet='%s': %dms", userID, betStr, betParseDuration.Nanoseconds()/1000000)
-		
+
 		if err != nil {
 			respondWithDeferredError(sess, inter, "Invalid bet amount: "+err.Error())
 			return
@@ -964,10 +964,10 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 
 		// Log overall performance and individual operation breakdown
 		overallDuration := time.Since(overallStart)
-		utils.BotLogf("BLACKJACK_PERF", "TOTAL blackjack command for user %d, bet %d: %dms (userdata=%dms, betparse=%dms, init=%dms, start=%dms)", 
+		utils.BotLogf("BLACKJACK_PERF", "TOTAL blackjack command for user %d, bet %d: %dms (userdata=%dms, betparse=%dms, init=%dms, start=%dms)",
 			userID, bet, overallDuration.Nanoseconds()/1000000,
 			userDataDuration.Nanoseconds()/1000000,
-			betParseDuration.Nanoseconds()/1000000, 
+			betParseDuration.Nanoseconds()/1000000,
 			gameInitDuration.Nanoseconds()/1000000,
 			gameStartDuration.Nanoseconds()/1000000)
 
