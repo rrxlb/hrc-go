@@ -469,7 +469,7 @@ func (bg *BlackjackGame) shouldSkipDealerAnimation() bool {
 	return true
 }
 
-// playDealerHand plays the dealer's hand with non-blocking realistic animation
+// playDealerHand plays the dealer's hand synchronously to ensure completion before results
 func (bg *BlackjackGame) playDealerHand() error {
 	// Set revealing state to disable player actions
 	bg.State = StateRevealing
@@ -488,40 +488,36 @@ func (bg *BlackjackGame) playDealerHand() error {
 		return nil
 	}
 
-	// If all remaining hands are auto-wins (blackjack or 5-card charlie), skip animation
+	// If all remaining hands are auto-wins (blackjack or 5-card charlie), skip dealer play
 	if bg.shouldSkipDealerAnimation() {
 		return nil
 	}
 
-	// Start dealer hand animation in background to avoid blocking
-	go bg.playDealerHandAsync()
-	
-	// Return immediately - animation continues in background
-	return nil
+	// Play dealer hand synchronously - dealer must complete before results are calculated
+	return bg.playDealerHandSync()
 }
 
-// playDealerHandAsync handles dealer animation asynchronously without corrupting game state
-func (bg *BlackjackGame) playDealerHandAsync() {
+// playDealerHandSync plays the dealer hand synchronously with animation
+func (bg *BlackjackGame) playDealerHandSync() error {
 	// Start with hole card reveal animation
 	if err := bg.revealDealerHoleCard(); err != nil {
 		// Continue with instant dealer play as fallback
-		bg.playDealerHandInstant()
-		return
+		return bg.playDealerHandInstant()
 	}
 
 	// Check if dealer already has 17+ after hole card reveal
 	if bg.DealerHand.GetValue() >= utils.DealerStandValue {
-		return // Dealer stands, no more cards needed
+		return nil // Dealer stands, no more cards needed
 	}
 
-	// Animate additional dealer hits without corrupting game state
+	// Play additional dealer hits synchronously
 	cardCount := 0
 	maxCards := 10 // Safety limit to prevent infinite loops
 	for bg.DealerHand.GetValue() < utils.DealerStandValue && cardCount < maxCards {
-		// Brief delay between cards (now non-blocking)
+		// Brief delay between cards for animation
 		time.Sleep(400 * time.Millisecond)
 
-		// Deal next card to actual dealer hand (this is the correct approach)
+		// Deal next card to dealer hand
 		newCard := bg.Deck.Deal()
 		bg.DealerHand.AddCard(newCard)
 		cardCount++
@@ -529,12 +525,16 @@ func (bg *BlackjackGame) playDealerHandAsync() {
 		// Update display with new card
 		if err := bg.updateDealerAnimation(); err != nil {
 			// Continue even if display update fails
+			utils.BotLogf("BLACKJACK", "Failed to update dealer animation for game %s: %v", bg.GameID, err)
 		}
 	}
 
 	if cardCount >= maxCards {
-		utils.BotLogf("BLACKJACK", "Dealer hand animation hit max cards limit for game %s", bg.GameID)
+		utils.BotLogf("BLACKJACK", "Dealer hand hit max cards limit for game %s", bg.GameID)
+		return fmt.Errorf("dealer hand exceeded maximum cards")
 	}
+
+	return nil
 }
 
 // sendDealerPlayingResponse immediately responds to the interaction with dealer playing state
