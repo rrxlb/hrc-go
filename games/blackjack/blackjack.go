@@ -440,7 +440,19 @@ func (bg *BlackjackGame) finishGame() error {
 	return nil
 }
 
-// playDealerHand plays the dealer's hand according to standard rules with minimal animation
+// shouldSkipDealerAnimation checks if all non-busted hands are auto-wins (no dealer play needed)
+func (bg *BlackjackGame) shouldSkipDealerAnimation() bool {
+	for _, hand := range bg.PlayerHands {
+		if !hand.IsBust() && !hand.IsBlackjack() && !hand.IsFiveCardCharlie() {
+			// Found a hand that needs dealer comparison
+			return false
+		}
+	}
+	// All non-busted hands are auto-wins
+	return true
+}
+
+// playDealerHand plays the dealer's hand with realistic card-by-card animation
 func (bg *BlackjackGame) playDealerHand() error {
 	// Set revealing state to disable player actions
 	bg.State = StateRevealing
@@ -459,6 +471,60 @@ func (bg *BlackjackGame) playDealerHand() error {
 		return nil
 	}
 
+	// If all remaining hands are auto-wins (blackjack or 5-card charlie), skip animation
+	if bg.shouldSkipDealerAnimation() {
+		return nil
+	}
+
+	// Start with hole card reveal animation
+	if err := bg.revealDealerHoleCard(); err != nil {
+		log.Printf("Failed to animate hole card reveal, falling back to instant: %v", err)
+		// Continue with instant dealer play as fallback
+		return bg.playDealerHandInstant()
+	}
+
+	// Check if dealer already has 17+ after hole card reveal
+	if bg.DealerHand.GetValue() >= utils.DealerStandValue {
+		return nil // Dealer stands, no more cards needed
+	}
+
+	// Animate additional dealer hits
+	cardCount := 0
+	maxCards := 10 // Safety limit to prevent infinite loops
+	for bg.DealerHand.GetValue() < utils.DealerStandValue && cardCount < maxCards {
+		// Add delay between cards (1 second)
+		time.Sleep(1000 * time.Millisecond)
+
+		// Deal next card
+		newCard := bg.Deck.Deal()
+		bg.DealerHand.AddCard(newCard)
+		cardCount++
+
+		// Update display with new card
+		if err := bg.updateGameStateRevealing(); err != nil {
+			log.Printf("Failed to update during dealer animation, continuing: %v", err)
+			// Continue even if display update fails
+		}
+	}
+
+	if cardCount >= maxCards {
+		log.Printf("Warning: dealer hit maximum card limit in blackjack game %s", bg.GameID)
+	}
+
+	return nil
+}
+
+// revealDealerHoleCard reveals the dealer's hole card with animation
+func (bg *BlackjackGame) revealDealerHoleCard() error {
+	// Add dramatic pause before revealing hole card
+	time.Sleep(1200 * time.Millisecond)
+
+	// Update the game state to show the hole card
+	return bg.updateGameStateRevealing()
+}
+
+// playDealerHandInstant plays dealer hand instantly (fallback for animation failures)
+func (bg *BlackjackGame) playDealerHandInstant() error {
 	// Dealer plays: hit on soft 17 and below, stand on hard 17 and above
 	cardCount := 0
 	maxCards := 10 // Safety limit to prevent infinite loops
@@ -471,9 +537,6 @@ func (bg *BlackjackGame) playDealerHand() error {
 	if cardCount >= maxCards {
 		log.Printf("Warning: dealer hit maximum card limit in blackjack game %s", bg.GameID)
 	}
-
-	// Skip intermediate update - finishGame will send the final state
-	// This prevents double interaction consumption issues
 
 	return nil
 }
