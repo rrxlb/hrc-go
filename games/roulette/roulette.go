@@ -1,7 +1,6 @@
 package roulette
 
 import (
-	"log"
 	"math/rand"
 	"strconv"
 	"strings"

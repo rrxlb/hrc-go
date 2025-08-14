@@ -2,7 +2,6 @@ package blackjack
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"sync"

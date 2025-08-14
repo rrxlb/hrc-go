@@ -89,7 +89,7 @@ func main() {
 		botStatus = "invalid_token"
 		select {}
 	}
-	if userIDPart, err := base64.RawStdEncoding.DecodeString(parts[0]); err == nil {
+	if _, err := base64.RawStdEncoding.DecodeString(parts[0]); err == nil {
 		// Expect numeric user ID
 	}
 	// Token validated and sanitized
@@ -329,13 +329,13 @@ func registerSlashCommands(s *discordgo.Session) error {
 		return nil
 	}
 	// Register guild commands (includes global + guild-only)
-	registeredGuild, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, devGuildID, append([]*discordgo.ApplicationCommand{}, append(globalCommands, guildCommands...)...))
+	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, devGuildID, append([]*discordgo.ApplicationCommand{}, append(globalCommands, guildCommands...)...))
 	if err != nil {
 		return fmt.Errorf("guild bulk overwrite failed: %w", err)
 	}
 	// Global sync (may take up to an hour to propagate)
 	// Register only global commands globally
-	registeredGlobal, gErr := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", globalCommands)
+	s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", globalCommands)
 	os.WriteFile(hashFile, []byte(newHash), 0644)
 	return nil
 }

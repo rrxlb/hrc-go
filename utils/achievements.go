@@ -3,7 +3,6 @@ package utils
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -512,11 +511,6 @@ func (am *AchievementManager) AwardAchievement(userID int64, achievementID int) 
 	if err != nil {
 		return fmt.Errorf("failed to award achievement: %w", err)
 	}
-
-	am.mutex.RLock()
-	achievement := am.achievements[achievementID]
-	am.mutex.RUnlock()
-
 
 	return nil
 }

@@ -2,7 +2,6 @@ package slots
 
 import (
 	"fmt"
-	"log"
 	"math/rand"
 	"strings"
 	"time"

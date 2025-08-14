@@ -5,7 +5,6 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -224,8 +223,6 @@ func CloseDatabase() {
 
 // GetUser retrieves a user from the database, creating one if it doesn't exist
 func GetUser(userID int64) (*User, error) {
-	start := time.Now()
-
 	if DB == nil {
 		return &User{
 			UserID:              userID,

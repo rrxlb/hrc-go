@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"log"
 	"sync"
 	"time"
 )
@@ -244,8 +243,6 @@ func (uc *UserCache) cleanup() {
 
 // GetCachedUser retrieves user data from cache or database (zero-copy for read-only access)
 func GetCachedUser(userID int64) (*User, error) {
-	start := time.Now()
-
 	// Try cache first with zero-copy optimization
 	if Cache != nil {
 		if user, found := Cache.Get(userID); found {
@@ -254,7 +251,6 @@ func GetCachedUser(userID int64) (*User, error) {
 	}
 
 	// If not in cache, get from database
-	dbStart := time.Now()
 	user, err := GetUser(userID)
 	if err != nil {
 		return nil, err

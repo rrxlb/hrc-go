@@ -411,7 +411,6 @@ func (jm *JackpotManager) ResetJackpot(jackpotType JackpotType) error {
 		return fmt.Errorf("jackpot type %s not found", jackpotType)
 	}
 
-	oldAmount := jackpot.Amount
 	jackpot.Amount = jackpot.SeedAmount
 	jackpot.LastWinner = nil
 	jackpot.LastWinAmount = nil

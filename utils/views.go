@@ -2,7 +2,6 @@ package utils
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
@@ -300,15 +299,6 @@ func SendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreat
 	}
 
 	err := s.InteractionRespond(i.Interaction, response)
-	if err != nil {
-		// Get command name safely based on interaction type
-		cmdName := "unknown"
-		if i.Type == discordgo.InteractionApplicationCommand {
-			cmdName = i.ApplicationCommandData().Name
-		} else if i.Type == discordgo.InteractionMessageComponent {
-			cmdName = i.MessageComponentData().CustomID
-		}
-	}
 	return err
 }
 
