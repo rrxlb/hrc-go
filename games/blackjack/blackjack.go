@@ -478,8 +478,8 @@ func (bg *BlackjackGame) playDealerHand() error {
 	cardCount := 0
 	maxCards := 10 // Safety limit to prevent infinite loops
 	for bg.DealerHand.GetValue() < utils.DealerStandValue && cardCount < maxCards {
-		// Add delay between cards (1 second)
-		time.Sleep(1000 * time.Millisecond)
+		// Brief delay between cards
+		time.Sleep(400 * time.Millisecond)
 
 		// Deal next card
 		newCard := bg.Deck.Deal()
@@ -549,8 +549,8 @@ func (bg *BlackjackGame) updateDealerAnimation() error {
 
 // revealDealerHoleCard reveals the dealer's hole card with animation
 func (bg *BlackjackGame) revealDealerHoleCard() error {
-	// Add dramatic pause before revealing hole card
-	time.Sleep(1200 * time.Millisecond)
+	// Quick pause before revealing hole card
+	time.Sleep(300 * time.Millisecond)
 
 	// Update the game state to show the hole card using fallback edit
 	return bg.updateDealerAnimation()
