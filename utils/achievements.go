@@ -618,6 +618,55 @@ func SendAchievementNotification(session *discordgo.Session, interaction *discor
 	}
 
 	// Log the notification
+	if len(achievements) == 1 {
+		fmt.Printf("Achievement unlocked for user: %s - %s\n", getInteractionUserID(interaction), achievements[0].Name)
+	} else {
+		fmt.Printf("Multiple achievements (%d) unlocked for user: %s\n", len(achievements), getInteractionUserID(interaction))
+	}
 
 	return nil
+}
+
+// SendAchievementNotificationDM sends achievement notification via DM (fallback when no interaction)
+func SendAchievementNotificationDM(session *discordgo.Session, userID string, achievements []*Achievement) error {
+	if len(achievements) == 0 {
+		return nil
+	}
+
+	embed := CreateAchievementNotificationEmbed(achievements)
+	if embed == nil {
+		return fmt.Errorf("failed to create achievement notification embed")
+	}
+
+	// Try to create DM channel with user
+	dmChannel, err := session.UserChannelCreate(userID)
+	if err != nil {
+		return fmt.Errorf("failed to create DM channel: %w", err)
+	}
+
+	// Send the embed
+	_, err = session.ChannelMessageSendEmbed(dmChannel.ID, embed)
+	if err != nil {
+		return fmt.Errorf("failed to send DM notification: %w", err)
+	}
+
+	// Log the notification
+	if len(achievements) == 1 {
+		fmt.Printf("Achievement DM sent to user: %s - %s\n", userID, achievements[0].Name)
+	} else {
+		fmt.Printf("Multiple achievements DM (%d) sent to user: %s\n", len(achievements), userID)
+	}
+
+	return nil
+}
+
+// Helper function to get user ID from interaction
+func getInteractionUserID(interaction *discordgo.InteractionCreate) string {
+	if interaction.Member != nil && interaction.Member.User != nil {
+		return interaction.Member.User.ID
+	}
+	if interaction.User != nil {
+		return interaction.User.ID
+	}
+	return "unknown"
 }

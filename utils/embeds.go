@@ -688,6 +688,11 @@ func CreateAchievementNotificationEmbed(achievements []*Achievement) *discordgo.
 		achievement := achievements[0]
 		title = "🎉 Achievement Unlocked!"
 		description = fmt.Sprintf("%s **%s**\n*%s*", achievement.Icon, achievement.Name, achievement.Description)
+
+		// Add category for single achievement
+		if achievement.Category != "" {
+			description += fmt.Sprintf("\n\n**Category:** %s", achievement.Category)
+		}
 	} else {
 		title = fmt.Sprintf("🎉 %d Achievements Unlocked!", len(achievements))
 		var lines []string
@@ -695,6 +700,7 @@ func CreateAchievementNotificationEmbed(achievements []*Achievement) *discordgo.
 			lines = append(lines, fmt.Sprintf("%s **%s**", achievement.Icon, achievement.Name))
 		}
 		description = strings.Join(lines, "\n")
+		description += fmt.Sprintf("\n\n*You've earned %d achievements at once! Amazing!*", len(achievements))
 	}
 
 	embed := CreateBrandedEmbed(title, description, 0xFFD700) // Gold color
@@ -709,17 +715,17 @@ func CreateAchievementNotificationEmbed(achievements []*Achievement) *discordgo.
 		var rewardLines []string
 
 		if totalChipsReward > 0 {
-			rewardLines = append(rewardLines, fmt.Sprintf("%s %s", FormatChips(totalChipsReward), ChipsEmoji))
+			rewardLines = append(rewardLines, fmt.Sprintf("💰 **%s** chips", FormatNumber(totalChipsReward)))
 		}
 
 		if totalXPReward > 0 {
-			rewardLines = append(rewardLines, fmt.Sprintf("%s XP", FormatChips(totalXPReward)))
+			rewardLines = append(rewardLines, fmt.Sprintf("⭐ **%s** XP", FormatNumber(totalXPReward)))
 		}
 
 		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "🎁 Rewards",
+			Name:   "🎁 Total Rewards Earned",
 			Value:  strings.Join(rewardLines, "\n"),
-			Inline: false,
+			Inline: true,
 		})
 	}
 
@@ -727,14 +733,72 @@ func CreateAchievementNotificationEmbed(achievements []*Achievement) *discordgo.
 	if len(achievements) > 1 {
 		var achievementDetails []string
 		for _, achievement := range achievements {
-			achievementDetails = append(achievementDetails, fmt.Sprintf("**%s** - *%s*", achievement.Name, achievement.Description))
+			rewardText := ""
+			if achievement.ChipsReward > 0 || achievement.XPReward > 0 {
+				var rewards []string
+				if achievement.ChipsReward > 0 {
+					rewards = append(rewards, fmt.Sprintf("%s chips", FormatNumber(achievement.ChipsReward)))
+				}
+				if achievement.XPReward > 0 {
+					rewards = append(rewards, fmt.Sprintf("%s XP", FormatNumber(achievement.XPReward)))
+				}
+				rewardText = fmt.Sprintf(" *(+%s)*", strings.Join(rewards, ", "))
+			}
+
+			achievementDetails = append(achievementDetails,
+				fmt.Sprintf("%s **%s**%s\n*%s*",
+					achievement.Icon,
+					achievement.Name,
+					rewardText,
+					achievement.Description))
 		}
 
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   "📜 Details",
-			Value:  strings.Join(achievementDetails, "\n"),
-			Inline: false,
-		})
+		// Split into multiple fields if too long
+		detailsText := strings.Join(achievementDetails, "\n\n")
+		if len(detailsText) <= 1024 {
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name:   "📜 Achievement Details",
+				Value:  detailsText,
+				Inline: false,
+			})
+		} else {
+			// Split into chunks if too long
+			maxCharsPerField := 900
+			currentChunk := ""
+			chunkNum := 1
+
+			for _, detail := range achievementDetails {
+				if len(currentChunk)+len(detail)+2 > maxCharsPerField && currentChunk != "" {
+					embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+						Name:   fmt.Sprintf("📜 Achievement Details (%d)", chunkNum),
+						Value:  currentChunk,
+						Inline: false,
+					})
+					currentChunk = detail
+					chunkNum++
+				} else {
+					if currentChunk != "" {
+						currentChunk += "\n\n" + detail
+					} else {
+						currentChunk = detail
+					}
+				}
+			}
+
+			// Add final chunk
+			if currentChunk != "" {
+				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+					Name:   fmt.Sprintf("📜 Achievement Details (%d)", chunkNum),
+					Value:  currentChunk,
+					Inline: false,
+				})
+			}
+		}
+	}
+
+	// Add footer with helpful tip
+	embed.Footer = &discordgo.MessageEmbedFooter{
+		Text: "Use /achievements to view all your progress!",
 	}
 
 	return embed
