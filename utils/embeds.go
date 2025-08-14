@@ -564,7 +564,7 @@ func RouletteGameEmbed(state string, bets map[string]int64, resultNumber int, re
 		}
 	}
 	embed := CreateBrandedEmbed(title, description, color)
-	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753042166/3_vxurig.png"}
+	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1755154578/RO3_ewpp4c.png"}
 	// Bets
 	if len(bets) > 0 {
 		var lines []string
