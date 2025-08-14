@@ -287,10 +287,7 @@ func registerSlashCommands(s *discordgo.Session) error {
 		higherorlower.RegisterHigherOrLowerCommand(),
 		roulette.RegisterRouletteCommand(),
 		threecardpoker.RegisterThreeCardPokerCommand(),
-	}
-
-	// Guild-only commands
-	guildCommands := []*discordgo.ApplicationCommand{
+		// Admin commands (with runtime permission checking)
 		{
 			Name:        "addchips",
 			Description: "Add chips to a user's balance (Admins only)",
@@ -318,7 +315,7 @@ func registerSlashCommands(s *discordgo.Session) error {
 	}
 
 	// Hash commands to skip unnecessary overwrites
-	data, _ := json.Marshal(append([]*discordgo.ApplicationCommand{}, append(globalCommands, guildCommands...)...))
+	data, _ := json.Marshal(globalCommands)
 	sha := sha256.Sum256(data)
 	newHash := hex.EncodeToString(sha[:])
 	const hashFile = ".commands.hash"
@@ -329,7 +326,7 @@ func registerSlashCommands(s *discordgo.Session) error {
 	}
 	// Global registration only (eliminates duplicate commands)
 	// Register all commands globally (may take up to an hour to propagate)
-	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", append([]*discordgo.ApplicationCommand{}, append(globalCommands, guildCommands...)...))
+	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", globalCommands)
 	if err != nil {
 		return fmt.Errorf("global bulk overwrite failed: %w", err)
 	}
