@@ -246,7 +246,6 @@ func (jm *JackpotManager) saveDefaultJackpots() error {
 	return nil
 }
 
-
 // ContributeToJackpot adds a contribution to the specified jackpot
 func (jm *JackpotManager) ContributeToJackpot(jackpotType JackpotType, betAmount int64) (int64, error) {
 	// First: update in-memory state under lock quickly

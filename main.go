@@ -108,7 +108,6 @@ func main() {
 	// Optional: uncomment if you later need message content
 	// session.Identify.Intents |= discordgo.IntentMessageContent
 
-
 	// Add event handlers
 	session.AddHandler(onReady)
 	session.AddHandler(onInteractionCreate)
@@ -328,14 +327,12 @@ func registerSlashCommands(s *discordgo.Session) error {
 	if oldHash == newHash {
 		return nil
 	}
-	// Register guild commands (includes global + guild-only)
-	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, devGuildID, append([]*discordgo.ApplicationCommand{}, append(globalCommands, guildCommands...)...))
+	// Global registration only (eliminates duplicate commands)
+	// Register all commands globally (may take up to an hour to propagate)
+	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", append([]*discordgo.ApplicationCommand{}, append(globalCommands, guildCommands...)...))
 	if err != nil {
-		return fmt.Errorf("guild bulk overwrite failed: %w", err)
+		return fmt.Errorf("global bulk overwrite failed: %w", err)
 	}
-	// Global sync (may take up to an hour to propagate)
-	// Register only global commands globally
-	s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", globalCommands)
 	os.WriteFile(hashFile, []byte(newHash), 0644)
 	return nil
 }
@@ -1159,7 +1156,7 @@ func handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				if updatedUser, err := utils.GetUser(userID); err == nil {
 					newlyAwarded, err := utils.AchievementMgr.CheckUserAchievements(updatedUser)
 					if err == nil && len(newlyAwarded) > 0 {
-								// Could send achievement notification here if needed
+						// Could send achievement notification here if needed
 					}
 				}
 			}

@@ -256,12 +256,10 @@ func GetCachedUser(userID int64) (*User, error) {
 		return nil, err
 	}
 
-
 	// Store in cache if cache is initialized
 	if Cache != nil {
 		Cache.Set(userID, user)
 	}
-
 
 	return user, nil
 }

@@ -193,7 +193,6 @@ func SetupDatabase() error {
 	DB = pool
 	dbInitialized = true
 
-
 	// Ensure core tables exist
 	createUsersTable()
 
