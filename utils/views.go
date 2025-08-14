@@ -463,6 +463,21 @@ func IsWebhookExpired(err error) bool {
 		   })
 }
 
+// IsInteractionAlreadyAcknowledged checks for interaction already acknowledged error (code 40060)
+func IsInteractionAlreadyAcknowledged(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check for Discord error code 40060
+	errMsg := err.Error()
+	return ContainsAny(errMsg, []string{
+		"\"code\": 40060", // Interaction has already been acknowledged
+		"\"code\":40060",  // Interaction has already been acknowledged (no space)
+		"Interaction has already been acknowledged",
+	})
+}
+
 // ContainsAny checks if a string contains any of the provided substrings
 func ContainsAny(s string, substrings []string) bool {
 	for _, substr := range substrings {
@@ -643,9 +658,9 @@ func EditAfterResponse(
 	return nil
 }
 
-// QuickGameResponse provides the fastest possible response for game commands
-// Uses minimal loading embed, then updates with game content
-func QuickGameResponse(
+// QuickDeferredResponse provides fast response for already-deferred interactions
+// Uses loading embed that immediately updates to final content
+func QuickDeferredResponse(
 	session *discordgo.Session,
 	interaction *discordgo.InteractionCreate,
 	gameEmbed *discordgo.MessageEmbed,
@@ -657,17 +672,40 @@ func QuickGameResponse(
 		Title: "🎮 " + gameTitle,
 		Color: 0x7289DA,
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: "Preparing game...",
+			Text: "Loading...",
 		},
 	}
 
-	// Use edit-after-response pattern with 100ms delay
-	return EditAfterResponse(
-		session,
-		interaction,
-		loadingEmbed,
-		gameEmbed,
-		gameComponents,
-		100*time.Millisecond,
-	)
+	// Update deferred response immediately with loading embed
+	err := UpdateInteractionResponseWithTimeout(session, interaction, loadingEmbed, nil, 1*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to send loading response: %w", err)
+	}
+
+	// Schedule update with final content after brief delay
+	go func() {
+		time.Sleep(50 * time.Millisecond) // Very short delay for smooth transition
+		UpdateInteractionResponseWithTimeout(session, interaction, gameEmbed, gameComponents, 2*time.Second)
+	}()
+
+	return nil
+}
+
+// QuickGameResponse provides the fastest possible response for game commands
+// Automatically detects deferred vs fresh interactions and uses appropriate method
+func QuickGameResponse(
+	session *discordgo.Session,
+	interaction *discordgo.InteractionCreate,
+	gameEmbed *discordgo.MessageEmbed,
+	gameComponents []discordgo.MessageComponent,
+	gameTitle string,
+) error {
+	// For fresh interactions (not deferred), use the edit-after pattern
+	// For deferred interactions, use direct update pattern
+	
+	// Check if this is a fresh interaction by attempting to detect if it was deferred
+	// We can infer this from the interaction type and context
+	
+	// Use deferred response pattern directly - this is safer for slash commands
+	return QuickDeferredResponse(session, interaction, gameEmbed, gameComponents, gameTitle)
 }

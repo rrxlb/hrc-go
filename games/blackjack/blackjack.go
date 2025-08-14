@@ -166,17 +166,25 @@ func (bg *BlackjackGame) StartGame() error {
 	// Performance logging: Response sending
 	responseStart := time.Now()
 	
-	// Use ultra-fast response pattern for instant Discord feedback
+	// Use optimized response pattern with proper error handling
 	var err error
 	if bg.State == StateDeferred {
-		// Interaction was deferred; use fastest possible update with enhanced error logging
-		utils.BotLogf("BLACKJACK_PERF", "Attempting QuickGameResponse for user %d", bg.UserID)
-		err = utils.QuickGameResponse(bg.Session, bg.OriginalInteraction, embed, components, "Blackjack")
+		// Interaction was deferred; use optimized deferred response pattern
+		utils.BotLogf("BLACKJACK_PERF", "Using QuickDeferredResponse for user %d", bg.UserID)
+		err = utils.QuickDeferredResponse(bg.Session, bg.OriginalInteraction, embed, components, "Blackjack")
 		if err != nil {
-			utils.BotLogf("BLACKJACK_ERROR", "QuickGameResponse failed for user %d: %v", bg.UserID, err)
-			// Fallback to direct update without loading pattern
-			utils.BotLogf("BLACKJACK_PERF", "Falling back to direct UpdateInteractionResponse for user %d", bg.UserID)
-			err = utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 2*time.Second)
+			utils.BotLogf("BLACKJACK_ERROR", "QuickDeferredResponse failed for user %d: %v", bg.UserID, err)
+			
+			// Check if it's the "already acknowledged" error
+			if utils.IsInteractionAlreadyAcknowledged(err) {
+				utils.BotLogf("BLACKJACK_ERROR", "Interaction already acknowledged - using direct update for user %d", bg.UserID)
+				// Direct update without any acknowledgment
+				err = utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 2*time.Second)
+			} else {
+				// Other error - fallback to direct update
+				utils.BotLogf("BLACKJACK_PERF", "Falling back to direct UpdateInteractionResponse for user %d", bg.UserID)
+				err = utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 2*time.Second)
+			}
 		}
 		if err == nil {
 			bg.State = StateActive
