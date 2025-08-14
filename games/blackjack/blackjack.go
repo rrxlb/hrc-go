@@ -166,32 +166,18 @@ func (bg *BlackjackGame) StartGame() error {
 	// Performance logging: Response sending
 	responseStart := time.Now()
 	
-	// Use optimized response pattern with proper error handling
+	// Use simple, working response pattern without complex animations
 	var err error
 	if bg.State == StateDeferred {
-		// Interaction was deferred; use optimized deferred response pattern
-		utils.BotLogf("BLACKJACK_PERF", "Using QuickDeferredResponse for user %d", bg.UserID)
-		err = utils.QuickDeferredResponse(bg.Session, bg.OriginalInteraction, embed, components, "Blackjack")
-		if err != nil {
-			utils.BotLogf("BLACKJACK_ERROR", "QuickDeferredResponse failed for user %d: %v", bg.UserID, err)
-			
-			// Check if it's the "already acknowledged" error
-			if utils.IsInteractionAlreadyAcknowledged(err) {
-				utils.BotLogf("BLACKJACK_ERROR", "Interaction already acknowledged - using direct update for user %d", bg.UserID)
-				// Direct update without any acknowledgment
-				err = utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 2*time.Second)
-			} else {
-				// Other error - fallback to direct update
-				utils.BotLogf("BLACKJACK_PERF", "Falling back to direct UpdateInteractionResponse for user %d", bg.UserID)
-				err = utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 2*time.Second)
-			}
-		}
+		// Interaction was deferred; use direct update with timeout optimization
+		utils.BotLogf("BLACKJACK_PERF", "Using direct UpdateInteractionResponse for user %d", bg.UserID)
+		err = utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 2*time.Second)
 		if err == nil {
 			bg.State = StateActive
 		}
 	} else {
 		// No prior response; send initial response now (fallback case)
-		err = utils.SendInteractionResponseWithTimeout(bg.Session, bg.Interaction, embed, components, false, 1*time.Second)
+		err = utils.SendInteractionResponseWithTimeout(bg.Session, bg.Interaction, embed, components, false, 2*time.Second)
 		if err == nil {
 			bg.State = StateActive
 		}
@@ -514,99 +500,41 @@ func (bg *BlackjackGame) playDealerHand() error {
 	return nil
 }
 
-// playDealerHandAsync handles dealer animation asynchronously using animation manager
+// playDealerHandAsync handles dealer animation asynchronously without corrupting game state
 func (bg *BlackjackGame) playDealerHandAsync() {
-	// Create animation frames for smooth dealer card reveals
-	animationID := fmt.Sprintf("dealer_%s", bg.GameID)
-	
-	// Build animation sequence
-	frames := bg.buildDealerAnimationFrames()
-	if len(frames) == 0 {
-		// No animation needed, play instantly
+	// Start with hole card reveal animation
+	if err := bg.revealDealerHoleCard(); err != nil {
+		// Continue with instant dealer play as fallback
 		bg.playDealerHandInstant()
 		return
 	}
 
-	// Ensure we have message info for animation
-	if bg.ChannelID == "" || bg.MessageID == "" {
-		// Wait briefly for message ID to be captured, then try fallback
-		time.Sleep(150 * time.Millisecond)
-		if bg.ChannelID == "" || bg.MessageID == "" {
-			// Fall back to instant play if no message info available
-			bg.playDealerHandInstant()
-			return
-		}
+	// Check if dealer already has 17+ after hole card reveal
+	if bg.DealerHand.GetValue() >= utils.DealerStandValue {
+		return // Dealer stands, no more cards needed
 	}
 
-	// Start smooth animation sequence
-	utils.Animations.StartAnimation(animationID, bg.Session, bg.ChannelID, bg.MessageID, frames)
-}
-
-// buildDealerAnimationFrames creates animation frames for dealer card reveals
-func (bg *BlackjackGame) buildDealerAnimationFrames() []utils.AnimationFrame {
-	var frames []utils.AnimationFrame
-	
-	// Check if any player hands are not busted
-	anyPlayerNotBusted := false
-	for _, hand := range bg.PlayerHands {
-		if !hand.IsBust() {
-			anyPlayerNotBusted = true
-			break
-		}
-	}
-
-	// If all players are busted, no animation needed
-	if !anyPlayerNotBusted {
-		return frames
-	}
-
-	// If all remaining hands are auto-wins, skip animation
-	if bg.shouldSkipDealerAnimation() {
-		return frames
-	}
-
-	// Create a copy of dealer hand for animation simulation
-	animationDealerHand := &utils.Hand{
-		Cards: make([]utils.Card, len(bg.DealerHand.Cards)),
-		Game:  bg.DealerHand.Game,
-	}
-	copy(animationDealerHand.Cards, bg.DealerHand.Cards)
-
-	// Frame 1: Hole card reveal (200ms delay)
-	embed := bg.createGameEmbed(true) // Show dealer cards revealed
-	components := bg.View.DisableAllButtons()
-	frames = append(frames, utils.AnimationFrame{
-		Embed:      embed,
-		Components: components,
-		Delay:      200 * time.Millisecond,
-	})
-
-	// If dealer already has 17+, no more cards needed
-	if animationDealerHand.GetValue() >= utils.DealerStandValue {
-		return frames
-	}
-
-	// Simulate dealer hits and create frames
+	// Animate additional dealer hits without corrupting game state
 	cardCount := 0
-	maxCards := 10
-	for animationDealerHand.GetValue() < utils.DealerStandValue && cardCount < maxCards {
-		// Deal next card to animation hand
+	maxCards := 10 // Safety limit to prevent infinite loops
+	for bg.DealerHand.GetValue() < utils.DealerStandValue && cardCount < maxCards {
+		// Brief delay between cards (now non-blocking)
+		time.Sleep(400 * time.Millisecond)
+
+		// Deal next card to actual dealer hand (this is the correct approach)
 		newCard := bg.Deck.Deal()
-		bg.DealerHand.AddCard(newCard) // Update real dealer hand
-		animationDealerHand.AddCard(newCard)
+		bg.DealerHand.AddCard(newCard)
 		cardCount++
 
-		// Create frame for this new card (400ms delay between hits)
-		embed := bg.createGameEmbed(true)
-		components := bg.View.DisableAllButtons()
-		frames = append(frames, utils.AnimationFrame{
-			Embed:      embed,
-			Components: components,
-			Delay:      400 * time.Millisecond,
-		})
+		// Update display with new card
+		if err := bg.updateDealerAnimation(); err != nil {
+			// Continue even if display update fails
+		}
 	}
 
-	return frames
+	if cardCount >= maxCards {
+		utils.BotLogf("BLACKJACK", "Dealer hand animation hit max cards limit for game %s", bg.GameID)
+	}
 }
 
 // sendDealerPlayingResponse immediately responds to the interaction with dealer playing state
