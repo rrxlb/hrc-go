@@ -2,6 +2,7 @@ package utils
 
 import (
 	"testing"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -164,4 +165,50 @@ type MockError struct {
 
 func (e *MockError) Error() string {
 	return e.Message
+}
+
+func TestPerformanceTracking(t *testing.T) {
+	// Reset metrics before test
+	ResetPerformanceMetrics()
+	
+	// Test successful call
+	TrackPerformance("TestOperation", 50*time.Millisecond, true, false)
+	
+	// Test failed call
+	TrackPerformance("TestOperation", 150*time.Millisecond, false, false)
+	
+	// Test timeout call
+	TrackPerformance("TestOperation", 200*time.Millisecond, false, true)
+	
+	metrics := GetPerformanceMetrics()
+	
+	// Verify metrics
+	if metrics.TotalCalls != 3 {
+		t.Errorf("Expected 3 total calls, got %d", metrics.TotalCalls)
+	}
+	
+	if metrics.SuccessfulCalls != 1 {
+		t.Errorf("Expected 1 successful call, got %d", metrics.SuccessfulCalls)
+	}
+	
+	if metrics.FailedCalls != 2 {
+		t.Errorf("Expected 2 failed calls, got %d", metrics.FailedCalls)
+	}
+	
+	if metrics.TimeoutCalls != 1 {
+		t.Errorf("Expected 1 timeout call, got %d", metrics.TimeoutCalls)
+	}
+	
+	if metrics.MinDuration != 50*time.Millisecond {
+		t.Errorf("Expected min duration 50ms, got %v", metrics.MinDuration)
+	}
+	
+	if metrics.MaxDuration != 200*time.Millisecond {
+		t.Errorf("Expected max duration 200ms, got %v", metrics.MaxDuration)
+	}
+	
+	expectedTotal := 50*time.Millisecond + 150*time.Millisecond + 200*time.Millisecond
+	if metrics.TotalDuration != expectedTotal {
+		t.Errorf("Expected total duration %v, got %v", expectedTotal, metrics.TotalDuration)
+	}
 }

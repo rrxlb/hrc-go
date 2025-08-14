@@ -293,6 +293,7 @@ func SendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreat
 
 // SendInteractionResponseWithTimeout sends an interaction response with configurable timeout
 func SendInteractionResponseWithTimeout(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, ephemeral bool, timeout time.Duration) error {
+	start := time.Now()
 	data := &discordgo.InteractionResponseData{
 		Embeds:     []*discordgo.MessageEmbed{embed},
 		Components: components,
@@ -324,12 +325,18 @@ func SendInteractionResponseWithTimeout(s *discordgo.Session, i *discordgo.Inter
 	// Wait for either success, error, or timeout
 	select {
 	case err := <-resultCh:
+		duration := time.Since(start)
 		if err != nil {
 			BotLogf("DISCORD_API", "SendInteractionResponse failed: %v", err)
+			TrackPerformance("SendInteractionResponse", duration, false, false)
+		} else {
+			TrackPerformance("SendInteractionResponse", duration, true, false)
 		}
 		return err
 	case <-ctx.Done():
+		duration := time.Since(start)
 		BotLogf("DISCORD_API", "SendInteractionResponse timed out after %v", timeout)
+		TrackPerformance("SendInteractionResponse", duration, false, true)
 		return ctx.Err()
 	}
 }
@@ -379,6 +386,7 @@ func UpdateInteractionResponseWithRetry(s *discordgo.Session, i *discordgo.Inter
 
 // updateInteractionResponseAttempt performs a single attempt to update the interaction response
 func updateInteractionResponseAttempt(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent, timeout time.Duration) error {
+	start := time.Now()
 	edit := &discordgo.WebhookEdit{
 		Embeds:     &[]*discordgo.MessageEmbed{embed},
 		Components: &components,
@@ -404,8 +412,12 @@ func updateInteractionResponseAttempt(s *discordgo.Session, i *discordgo.Interac
 	// Wait for either success, error, or timeout
 	select {
 	case err := <-resultCh:
+		duration := time.Since(start)
+		TrackPerformance("UpdateInteractionResponse", duration, err == nil, false)
 		return err
 	case <-ctx.Done():
+		duration := time.Since(start)
+		TrackPerformance("UpdateInteractionResponse", duration, false, true)
 		return ctx.Err()
 	}
 }
@@ -662,4 +674,80 @@ func OptimizeEmbedPayload(embed *discordgo.MessageEmbed) *discordgo.MessageEmbed
 func UpdateInteractionResponseOptimized(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
 	optimizedEmbed := OptimizeEmbedPayload(embed)
 	return UpdateInteractionResponse(s, i, optimizedEmbed, components)
+}
+
+// PerformanceMetrics tracks Discord API response performance
+type PerformanceMetrics struct {
+	TotalCalls    int64
+	SuccessfulCalls int64
+	FailedCalls   int64
+	TimeoutCalls  int64
+	TotalDuration time.Duration
+	MaxDuration   time.Duration
+	MinDuration   time.Duration
+}
+
+var discordAPIMetrics = &PerformanceMetrics{
+	MinDuration: time.Hour, // Start with high value
+}
+
+// TrackPerformance records performance metrics for Discord API calls
+func TrackPerformance(operation string, duration time.Duration, success bool, timedOut bool) {
+	discordAPIMetrics.TotalCalls++
+	discordAPIMetrics.TotalDuration += duration
+	
+	if success {
+		discordAPIMetrics.SuccessfulCalls++
+	} else {
+		discordAPIMetrics.FailedCalls++
+	}
+	
+	if timedOut {
+		discordAPIMetrics.TimeoutCalls++
+	}
+	
+	if duration > discordAPIMetrics.MaxDuration {
+		discordAPIMetrics.MaxDuration = duration
+	}
+	
+	if duration < discordAPIMetrics.MinDuration && duration > 0 {
+		discordAPIMetrics.MinDuration = duration
+	}
+	
+	// Log concerning performance
+	if duration > 200*time.Millisecond {
+		BotLogf("DISCORD_PERF", "SLOW %s: %dms (target: <100ms)", operation, duration.Milliseconds())
+	}
+}
+
+// GetPerformanceMetrics returns current Discord API performance metrics
+func GetPerformanceMetrics() PerformanceMetrics {
+	return *discordAPIMetrics
+}
+
+// ResetPerformanceMetrics resets the performance tracking metrics
+func ResetPerformanceMetrics() {
+	discordAPIMetrics.TotalCalls = 0
+	discordAPIMetrics.SuccessfulCalls = 0
+	discordAPIMetrics.FailedCalls = 0
+	discordAPIMetrics.TimeoutCalls = 0
+	discordAPIMetrics.TotalDuration = 0
+	discordAPIMetrics.MaxDuration = 0
+	discordAPIMetrics.MinDuration = time.Hour
+}
+
+// LogPerformanceStats logs current Discord API performance statistics
+func LogPerformanceStats() {
+	if discordAPIMetrics.TotalCalls == 0 {
+		BotLogf("DISCORD_PERF", "No Discord API calls recorded yet")
+		return
+	}
+
+	avgDuration := discordAPIMetrics.TotalDuration / time.Duration(discordAPIMetrics.TotalCalls)
+	successRate := float64(discordAPIMetrics.SuccessfulCalls) / float64(discordAPIMetrics.TotalCalls) * 100
+	timeoutRate := float64(discordAPIMetrics.TimeoutCalls) / float64(discordAPIMetrics.TotalCalls) * 100
+
+	BotLogf("DISCORD_PERF", "Discord API Stats - Calls: %d, Success: %.1f%%, Timeout: %.1f%%, Avg: %dms, Min: %dms, Max: %dms",
+		discordAPIMetrics.TotalCalls, successRate, timeoutRate,
+		avgDuration.Milliseconds(), discordAPIMetrics.MinDuration.Milliseconds(), discordAPIMetrics.MaxDuration.Milliseconds())
 }
