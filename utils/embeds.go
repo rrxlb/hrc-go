@@ -707,7 +707,7 @@ func CreateAchievementNotificationEmbed(achievements []*Achievement) *discordgo.
 
 	// Set achievement thumbnail
 	embed.Thumbnail = &discordgo.MessageEmbedThumbnail{
-		URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753046175/ER2_fwidxb.png",
+		URL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1755207106/AC_cndffu.png",
 	}
 
 	// Add rewards section if any rewards exist
