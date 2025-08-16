@@ -23,7 +23,7 @@ type TopGGVoteResponse struct {
 
 // NewTopGGClient creates a new Top.gg client
 func NewTopGGClient(botID string) *TopGGClient {
-	apiToken := os.Getenv("TOPGG_API_TOKEN")
+	apiToken := os.Getenv("TOPGG_TOKEN")
 	if apiToken == "" {
 		return nil
 	}

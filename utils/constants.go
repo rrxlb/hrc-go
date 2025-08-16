@@ -6,7 +6,7 @@ const (
 	HighRollersClubLink       = "https://discord.gg/RK4K8tDsHB"
 	DeveloperRoleID     int64 = 1399860810574073978
 	BotColor                  = 0x5865F2
-	PremiumRoleID       int64 = 1333193975947071488
+	PremiumRoleID       int64 = 1396631093154943026
 )
 
 // Economy & XP
@@ -106,18 +106,18 @@ const (
 
 // Emojis and Discord Elements
 const (
-	ChipsEmoji = "<:chips:1404332422451040330>"
+	ChipsEmoji = "<:chips:1396988413151940629>"
 )
 
 // Prestige and Premium badge emojis (used in profile "badges" row)
 // If a prestige level doesn't exist in this map, the code will fall back to a roman numeral.
 var PrestigeEmojis = map[int]string{
-	1: "<:p1:1404690937925337150>",
-	2: "<:p2:1404690951980584990>",
-	3: "<:p3:1404690959538851936>",
-	4: "<:p4:1404690967067623565>",
-	5: "<:p5:1404690974059528233>",
+	1: "<:p1:1401690446052458618>",
+	2: "<:p2:1401690453643886762>",
+	3: "<:p3:1401690460992442388>",
+	4: "<:p4:1401690470194872320>",
+	5: "<:p5:1401690479837577326>",
 }
 
 // Optional premium animated emoji (may be used in future badge rows alongside prestige)
-const PremiumEmoji = "<a:goat:1404690990505267384>"
+const PremiumEmoji = "<a:premium:1401694358532784178>"

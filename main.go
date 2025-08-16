@@ -37,9 +37,9 @@ var readyCh = make(chan struct{}, 1)
 const devGuildID = "1262162191923023882" // fast registration guild
 const (
 	// Admin configuration (as requested)
-	AdminLogChannelID = "1262162195429724183"
-	AdminGuildID      = "1262162191923023882"
-	AdminRoleID       = "1333188752054681632"
+	AdminLogChannelID = "1396996421340626954"
+	AdminGuildID      = "1396567190102347776"
+	AdminRoleID       = "1396615290015453195"
 )
 
 func main() {
@@ -858,8 +858,6 @@ func handleHelpCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		"Casino Games":   {"blackjack", "baccarat", "craps", "horl", "mines", "derby", "roulette", "slots", "tcpoker"},
 		"Bonuses":        {"hourly", "daily", "weekly", "vote", "bonus", "claimall", "cooldowns"},
 		"Profile / Rank": {"profile", "balance", "premium"},
-		"Admin":          {"addchips"},
-		"Help":           {"help"},
 	}
 	desc := map[string]string{
 		"blackjack": "Play Blackjack",
@@ -881,8 +879,6 @@ func handleHelpCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		"profile":   "View your casino profile and stats",
 		"balance":   "Check your chip balance",
 		"premium":   "Manage premium feature visibility",
-		"addchips":  "Add chips to a user (admins)",
-		"help":      "Show this help",
 	}
 	for name, cmds := range cats {
 		var lines []string
