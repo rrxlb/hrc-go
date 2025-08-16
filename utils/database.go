@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -270,10 +271,8 @@ func SetupDatabase() error {
 	// Create performance indexes
 	createPerformanceIndexes()
 
-	// Initialize prepared statements for high-frequency queries
-	if err := initializePreparedStatements(); err != nil {
-		return fmt.Errorf("failed to initialize prepared statements: %w", err)
-	}
+	// Note: Prepared statements with connection pools require per-connection preparation
+	// We'll use optimized direct queries instead for better pool compatibility
 
 	return nil
 }
@@ -905,37 +904,7 @@ func createPerformanceIndexes() error {
 	return nil
 }
 
-// Prepared statement names for high-frequency queries
-var (
-	preparedStatements = map[string]string{
-		"getUserByID":       "SELECT user_id, chips, total_xp, current_xp, prestige, wins, losses, daily_bonuses_claimed, votes_count, last_hourly, last_daily, last_weekly, last_vote, last_bonus, premium_settings, created_at FROM users WHERE user_id = $1",
-		"leaderboardChips":  "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10",
-		"leaderboardXP":     "SELECT user_id, total_xp FROM users ORDER BY total_xp DESC, user_id LIMIT 10",
-		"leaderboardPrestige": "SELECT user_id, prestige FROM users ORDER BY prestige DESC, user_id LIMIT 10",
-		"updateUserStats":   "UPDATE users SET chips = chips + $2, total_xp = total_xp + $3, current_xp = current_xp + $4, wins = wins + $5, losses = losses + $6 WHERE user_id = $1 RETURNING user_id, chips, total_xp, current_xp, prestige, wins, losses, daily_bonuses_claimed, votes_count, last_hourly, last_daily, last_weekly, last_vote, last_bonus, premium_settings, created_at",
-	}
-)
-
-// initializePreparedStatements creates prepared statements for high-frequency queries
-func initializePreparedStatements() error {
-	if DB == nil {
-		return fmt.Errorf("database not connected")
-	}
-
-	ctx := context.Background()
-	
-	// Prepare high-frequency statements
-	for name, query := range preparedStatements {
-		_, err := DB.Prepare(ctx, name, query)
-		if err != nil {
-			return fmt.Errorf("failed to prepare statement %s: %w", name, err)
-		}
-	}
-	
-	return nil
-}
-
-// GetLeaderboard executes optimized leaderboard query using prepared statements
+// GetLeaderboard executes optimized leaderboard query with direct SQL for reliable operation
 func GetLeaderboard(leaderboardType string) (pgx.Rows, error) {
 	if DB == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -945,12 +914,12 @@ func GetLeaderboard(leaderboardType string) (pgx.Rows, error) {
 
 	switch leaderboardType {
 	case "chips":
-		return DB.Query(ctx, "leaderboardChips")
+		return DB.Query(ctx, "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10")
 	case "xp":
-		return DB.Query(ctx, "leaderboardXP")
+		return DB.Query(ctx, "SELECT user_id, total_xp FROM users ORDER BY total_xp DESC, user_id LIMIT 10")
 	case "prestige":
-		return DB.Query(ctx, "leaderboardPrestige")
+		return DB.Query(ctx, "SELECT user_id, prestige FROM users ORDER BY prestige DESC, user_id LIMIT 10")
 	default:
-		return DB.Query(ctx, "leaderboardChips")
+		return DB.Query(ctx, "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10")
 	}
 }
