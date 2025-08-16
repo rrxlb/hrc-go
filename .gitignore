@@ -9,3 +9,5 @@ hrc-go.exe
 # Temporary files
 *.tmp
 out/
+
+.vscode
