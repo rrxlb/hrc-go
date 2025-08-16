@@ -151,16 +151,20 @@ func (bg *BlackjackGame) StartGame() error {
 	// Use simple, working response pattern without complex animations
 	var err error
 	if bg.State == StateDeferred {
-		// Interaction was deferred; use direct update with timeout optimization
-		err = utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 2*time.Second)
+		// Interaction was deferred; use direct update with increased timeout for reliability
+		err = utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 5*time.Second)
 		if err == nil {
 			bg.State = StateActive
+		} else {
+			utils.BotLogf("BLACKJACK", "Failed to update deferred interaction for game %s: %v", bg.GameID, err)
 		}
 	} else {
 		// No prior response; send initial response now (fallback case)
-		err = utils.SendInteractionResponseWithTimeout(bg.Session, bg.Interaction, embed, components, false, 2*time.Second)
+		err = utils.SendInteractionResponseWithTimeout(bg.Session, bg.Interaction, embed, components, false, 5*time.Second)
 		if err == nil {
 			bg.State = StateActive
+		} else {
+			utils.BotLogf("BLACKJACK", "Failed to send initial interaction response for game %s: %v", bg.GameID, err)
 		}
 	}
 
@@ -883,8 +887,45 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 
 	// All heavy work moved to async goroutine for optimal responsiveness
 	go func(sess *discordgo.Session, inter *discordgo.InteractionCreate) {
-		// Parse bet amount
-		betOption := inter.ApplicationCommandData().Options[0]
+		// Add panic recovery to prevent silent failures that leave "Bot is thinking..." state
+		defer func() {
+			if r := recover(); r != nil {
+				utils.BotLogf("BLACKJACK", "Panic in blackjack command handler: %v", r)
+				respondWithDeferredError(sess, inter, "An unexpected error occurred. Please try again.")
+			}
+		}()
+
+		// Add timeout to prevent goroutine from hanging indefinitely
+		done := make(chan bool, 1)
+		go func() {
+			time.Sleep(10 * time.Second) // 10 second timeout for the entire operation
+			select {
+			case done <- true:
+				utils.BotLogf("BLACKJACK", "Blackjack command timed out for user %s", inter.Member.User.ID)
+				respondWithDeferredError(sess, inter, "Command timed out. Please try again.")
+			default:
+				// Operation completed before timeout
+			}
+		}()
+
+		defer func() {
+			done <- true // Signal completion
+		}()
+
+		// Safety checks for interaction data
+		if inter == nil || inter.Member == nil || inter.Member.User == nil {
+			utils.BotLogf("BLACKJACK", "Invalid interaction data received")
+			return
+		}
+
+		// Parse bet amount with safety checks
+		options := inter.ApplicationCommandData().Options
+		if len(options) == 0 {
+			respondWithDeferredError(sess, inter, "No bet amount provided")
+			return
+		}
+		
+		betOption := options[0]
 		betStr := betOption.StringValue()
 
 		userID, err := parseUserID(inter.Member.User.ID)
@@ -892,6 +933,17 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 			respondWithDeferredError(sess, inter, "Failed to parse user ID")
 			return
 		}
+
+		// Check if user already has an active game to prevent race conditions
+		gamesMutex.RLock()
+		for _, existingGame := range ActiveGames {
+			if existingGame.UserID == userID {
+				gamesMutex.RUnlock()
+				respondWithDeferredError(sess, inter, "You already have an active blackjack game. Please finish it first.")
+				return
+			}
+		}
+		gamesMutex.RUnlock()
 
 		user, err := utils.GetCachedUser(userID)
 
@@ -919,6 +971,11 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 		}
 
 		game := NewBlackjackGame(sess, inter, bet)
+		if game == nil {
+			respondWithDeferredError(sess, inter, "Failed to create game instance")
+			return
+		}
+		
 		game.UserData = user
 		// Mark that the interaction was deferred
 		game.State = StateDeferred
@@ -928,8 +985,12 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 		ActiveGames[game.GameID] = game
 		gamesMutex.Unlock()
 
+		// Log game creation for debugging
+		utils.BotLogf("BLACKJACK", "Starting game %s for user %d with bet %d", game.GameID, userID, bet)
+
 		if err := game.StartGame(); err != nil {
-			respondWithDeferredError(sess, inter, "Failed to start game")
+			utils.BotLogf("BLACKJACK", "Failed to start game %s: %v", game.GameID, err)
+			respondWithDeferredError(sess, inter, "Failed to start game: "+err.Error())
 
 			// Clean up failed game
 			gamesMutex.Lock()
@@ -937,6 +998,8 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 			gamesMutex.Unlock()
 			return
 		}
+
+		utils.BotLogf("BLACKJACK", "Successfully started game %s for user %d", game.GameID, userID)
 	}(s, i)
 }
 
