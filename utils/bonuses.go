@@ -544,7 +544,11 @@ func (bm *BonusManager) CreateCooldownEmbed(user *User) *discordgo.MessageEmbed 
 		BonusServer: "🏠 High Roller Club",
 	}
 
-	for bonusType, result := range cooldowns {
+	// Define the order: Hourly, Daily, Weekly, High Roller Club, Vote
+	orderedBonusTypes := []BonusType{BonusHourly, BonusDaily, BonusWeekly, BonusServer, BonusVote}
+
+	for _, bonusType := range orderedBonusTypes {
+		result := cooldowns[bonusType]
 		name := bonusNames[bonusType]
 		var value string
 

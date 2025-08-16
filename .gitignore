@@ -11,3 +11,5 @@ hrc-go.exe
 out/
 
 .vscode
+
+.kiro
