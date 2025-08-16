@@ -24,8 +24,15 @@ var payoutRatios = map[string]float64{
 // Active games keyed by userID
 var activeGames = map[int64]*Game{}
 
-// Dice emojis (placeholder unicode; can be replaced with custom server emojis)
-var diceEmoji = map[int]string{1: "🎲1", 2: "🎲2", 3: "🎲3", 4: "🎲4", 5: "🎲5", 6: "🎲6"}
+// Custom dice emojis for Discord server
+var diceEmoji = map[int]string{
+	1: "<:dicesixfacesone:1396630388620656782>",
+	2: "<:dicesixfacestwo:1396630415455948990>",
+	3: "<:dicesixfacesthree:1396630430136139907>",
+	4: "<:dicesixfacesfour:1396630442316398632>",
+	5: "<:dicesixfacesfive:1396630450667262138>",
+	6: "<:dicesixfacessix:1396630463245844541>",
+}
 
 // Game phases
 const (
@@ -456,7 +463,7 @@ func (g *Game) endGame() {
 
 // buildEmbed builds the main game embed
 func (g *Game) buildEmbed(outcome, rollDisplay string) *discordgo.MessageEmbed {
-	title := "🎲 Craps Table"
+	title := "<:dicesixfacesone:1396630388620656782> Craps Table"
 	color := utils.BotColor
 	if g.BaseGame.IsGameOver() {
 		color = 0xE74C3C
@@ -554,7 +561,7 @@ func (g *Game) components() []discordgo.MessageComponent {
 		menuComp = sm
 	}
 	rowRoll := utils.CreateActionRow(
-		utils.CreateButton("craps_roll", "Roll", discordgo.SuccessButton, false, &discordgo.ComponentEmoji{Name: "🎲"}),
+		utils.CreateButton("craps_roll", "Roll", discordgo.SuccessButton, false, &discordgo.ComponentEmoji{Name: "dicesixfacesone", ID: "1396630388620656782"}),
 	)
 	rowMenu := utils.CreateActionRow(menuComp)
 	return []discordgo.MessageComponent{rowRoll, rowMenu}
