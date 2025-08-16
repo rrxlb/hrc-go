@@ -64,6 +64,13 @@ func main() {
 	utils.InitializeGameManager()
 	defer utils.CloseGameManager()
 
+	// Initialize async task processing for better responsiveness
+	utils.InitializeAsyncTasks(4, 1000) // 4 workers, 1000 task queue
+	defer utils.CloseAsyncTasks()
+
+	// Start Discord API performance monitoring
+	utils.DiscordOpt.StartPerformanceMonitoring(5 * time.Minute)
+
 	// Heavy subsystems deferred until after READY to reduce startup latency
 
 	// Get bot token from environment (common variable names)
@@ -694,26 +701,43 @@ func handleChipsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 func handleLeaderboardCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	startTime := time.Now()
+	defer func() {
+		// Log performance metrics for monitoring
+		duration := time.Since(startTime)
+		if duration > 500*time.Millisecond {
+			utils.BotLogf("PERFORMANCE", "Slow leaderboard command: %v", duration)
+		}
+	}()
+
 	opts := i.ApplicationCommandData().Options
 	sub := "chips"
 	if len(opts) > 0 {
 		sub = opts[0].Name
 	}
+	
 	// Optimized leaderboard query with prepared statements
 	title := map[string]string{"chips": "High Rollers", "xp": "Total XP", "prestige": "Prestige"}[sub]
 	if utils.DB == nil {
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed(title, "Database not connected.", 0xE74C3C), nil, false)
+		embed := utils.CreateBrandedEmbed(title, "Database not connected.", 0xE74C3C)
+		utils.SendInteractionResponse(s, i, embed, nil, false)
+		utils.ReleaseEmbed(embed)
 		return
 	}
 
 	// Use optimized prepared statements for leaderboard queries
 	rows, err := utils.GetLeaderboard(sub)
 	if err != nil {
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed(title, "Failed to load leaderboard.", 0xE74C3C), nil, false)
+		embed := utils.CreateBrandedEmbed(title, "Failed to load leaderboard.", 0xE74C3C)
+		utils.SendInteractionResponse(s, i, embed, nil, false)
+		utils.ReleaseEmbed(embed)
 		return
 	}
 	defer rows.Close()
-	lines := []string{}
+	
+	lines := utils.GetStringSliceFromPool()
+	defer utils.PutStringSliceToPool(lines)
+	
 	idx := 1
 	for rows.Next() {
 		var uid int64
@@ -736,10 +760,12 @@ func handleLeaderboardCommand(s *discordgo.Session, i *discordgo.InteractionCrea
 		}
 	}
 	if len(lines) == 0 {
-		lines = []string{"No data"}
+		lines = append(lines, "No data")
 	}
+	
 	embed := utils.CreateBrandedEmbed(title, strings.Join(lines, "\n"), utils.BotColor)
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}}})
+	utils.ReleaseEmbed(embed)
 }
 
 func handlePrestigeCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {

@@ -349,3 +349,72 @@ func GetCacheStats() CacheStats {
 		ColdEntries: cold,
 	}
 }
+
+// PredictiveCache implements read-ahead caching for related users
+type PredictiveCache struct {
+	guildMembers map[string][]int64 // Guild ID -> User IDs
+	mutex        sync.RWMutex
+}
+
+var PredCache = &PredictiveCache{
+	guildMembers: make(map[string][]int64),
+}
+
+// WarmupGuildCache preloads frequently accessed users from a guild
+func (pc *PredictiveCache) WarmupGuildCache(guildID string, userIDs []int64) {
+	if len(userIDs) == 0 {
+		return
+	}
+
+	// Load users in batch
+	users, err := GetMultipleUsers(userIDs)
+	if err != nil {
+		return
+	}
+
+	// Store in cache
+	for userID, user := range users {
+		if Cache != nil {
+			Cache.Set(userID, user)
+		}
+	}
+
+	// Track guild membership for future warmups
+	pc.mutex.Lock()
+	pc.guildMembers[guildID] = userIDs
+	pc.mutex.Unlock()
+}
+
+// GetRelatedUsers returns users likely to be accessed together
+func (pc *PredictiveCache) GetRelatedUsers(userID int64, guildID string) []int64 {
+	pc.mutex.RLock()
+	defer pc.mutex.RUnlock()
+
+	if members, exists := pc.guildMembers[guildID]; exists {
+		// Return up to 5 related users for batch loading
+		related := make([]int64, 0, 5)
+		for _, memberID := range members {
+			if memberID != userID && len(related) < 5 {
+				related = append(related, memberID)
+			}
+		}
+		return related
+	}
+	return nil
+}
+
+// WriteThrough implements write-through caching pattern
+func WriteThroughUpdate(userID int64, updates UserUpdateData) (*User, error) {
+	// Update database first
+	user, err := UpdateUser(userID, updates)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update cache immediately (write-through)
+	if Cache != nil {
+		Cache.Set(userID, user)
+	}
+
+	return user, nil
+}

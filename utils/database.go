@@ -125,6 +125,26 @@ var (
 			}
 		},
 	}
+	
+	embedPool = sync.Pool{
+		New: func() interface{} {
+			return &discordgo.MessageEmbed{
+				Fields: make([]*discordgo.MessageEmbedField, 0, 5),
+			}
+		},
+	}
+	
+	componentPool = sync.Pool{
+		New: func() interface{} {
+			return make([]discordgo.MessageComponent, 0, 5)
+		},
+	}
+	
+	stringSlicePool = sync.Pool{
+		New: func() interface{} {
+			return make([]string, 0, 10)
+		},
+	}
 )
 
 // GetUserFromPool retrieves a user struct from the object pool
@@ -139,6 +159,46 @@ func PutUserToPool(u *User) {
 		PremiumSettings: make(JSONB),
 	}
 	userPool.Put(u)
+}
+
+// GetEmbedFromPool retrieves an embed from the object pool
+func GetEmbedFromPool() *discordgo.MessageEmbed {
+	embed := embedPool.Get().(*discordgo.MessageEmbed)
+	// Reset embed fields
+	embed.Title = ""
+	embed.Description = ""
+	embed.Color = 0
+	embed.Fields = embed.Fields[:0] // Keep underlying array
+	embed.Footer = nil
+	embed.Thumbnail = nil
+	return embed
+}
+
+// PutEmbedToPool returns an embed to the object pool
+func PutEmbedToPool(embed *discordgo.MessageEmbed) {
+	embedPool.Put(embed)
+}
+
+// GetComponentsFromPool retrieves a component slice from the pool
+func GetComponentsFromPool() []discordgo.MessageComponent {
+	components := componentPool.Get().([]discordgo.MessageComponent)
+	return components[:0] // Reset length but keep capacity
+}
+
+// PutComponentsToPool returns components to the pool
+func PutComponentsToPool(components []discordgo.MessageComponent) {
+	componentPool.Put(components)
+}
+
+// GetStringSliceFromPool retrieves a string slice from the pool
+func GetStringSliceFromPool() []string {
+	slice := stringSlicePool.Get().([]string)
+	return slice[:0] // Reset length but keep capacity
+}
+
+// PutStringSliceToPool returns a string slice to the pool
+func PutStringSliceToPool(slice []string) {
+	stringSlicePool.Put(slice)
 }
 
 var (
@@ -170,11 +230,19 @@ func SetupDatabase() error {
 	}
 
 	// Optimize connection pool for Discord bot workload on Railway
-	config.MaxConns = 25                      // Utilize 25% of Railway's 100 connection limit
-	config.MinConns = 5                       // Keep more connections ready for bursts
-	config.MaxConnLifetime = 30 * time.Minute // Faster connection recycling
-	config.MaxConnIdleTime = 10 * time.Minute // Reduce idle connections faster
-	config.HealthCheckPeriod = 1 * time.Minute
+	config.MaxConns = 30                      // Increased for better concurrency
+	config.MinConns = 8                       // More ready connections for bursts
+	config.MaxConnLifetime = 45 * time.Minute // Balanced connection recycling
+	config.MaxConnIdleTime = 5 * time.Minute  // Faster idle cleanup
+	config.HealthCheckPeriod = 30 * time.Second // More frequent health checks
+	
+	// Additional performance optimizations
+	config.ConnConfig.RuntimeParams = map[string]string{
+		"application_name":     "hrc-discord-bot",
+		"timezone":            "UTC",
+		"statement_timeout":   "30s",
+		"idle_in_transaction_session_timeout": "60s",
+	}
 
 	// Create optimized connection pool
 	pool, err := pgxpool.NewWithConfig(ctx, config)
@@ -202,8 +270,10 @@ func SetupDatabase() error {
 	// Create performance indexes
 	createPerformanceIndexes()
 
-	// Note: Prepared statements removed due to connection pool compatibility issues
-	// Database queries will use direct SQL for reliable operation
+	// Initialize prepared statements for high-frequency queries
+	if err := initializePreparedStatements(); err != nil {
+		return fmt.Errorf("failed to initialize prepared statements: %w", err)
+	}
 
 	return nil
 }
@@ -516,6 +586,73 @@ func UpdateUser(userID int64, updates UserUpdateData) (*User, error) {
 	return user, nil
 }
 
+// BatchUpdateUsers updates multiple users in a single transaction for better performance
+func BatchUpdateUsers(updates []struct {
+	UserID int64
+	Data   UserUpdateData
+}) error {
+	if DB == nil {
+		return fmt.Errorf("database not connected")
+	}
+
+	ctx := context.Background()
+	tx, err := DB.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Batch update using COPY or prepared statements
+	for _, update := range updates {
+		_, err := UpdateUser(update.UserID, update.Data)
+		if err != nil {
+			return fmt.Errorf("failed to update user %d: %w", update.UserID, err)
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+// GetMultipleUsers retrieves multiple users in a single query
+func GetMultipleUsers(userIDs []int64) (map[int64]*User, error) {
+	if DB == nil || len(userIDs) == 0 {
+		return make(map[int64]*User), nil
+	}
+
+	ctx := context.Background()
+	
+	// Build parameterized query for multiple users
+	query := `
+		SELECT user_id, chips, total_xp, current_xp, prestige, wins, losses, 
+			   daily_bonuses_claimed, votes_count, last_hourly, last_daily, 
+			   last_weekly, last_vote, last_bonus, premium_settings, created_at
+		FROM users WHERE user_id = ANY($1)`
+
+	rows, err := DB.Query(ctx, query, userIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query multiple users: %w", err)
+	}
+	defer rows.Close()
+
+	users := make(map[int64]*User)
+	for rows.Next() {
+		user := GetUserFromPool()
+		err := rows.Scan(
+			&user.UserID, &user.Chips, &user.TotalXP, &user.CurrentXP,
+			&user.Prestige, &user.Wins, &user.Losses, &user.DailyBonusesClaimed,
+			&user.VotesCount, &user.LastHourly, &user.LastDaily, &user.LastWeekly,
+			&user.LastVote, &user.LastBonus, &user.PremiumSettings, &user.CreatedAt,
+		)
+		if err != nil {
+			PutUserToPool(user)
+			return nil, fmt.Errorf("failed to scan user: %w", err)
+		}
+		users[user.UserID] = user
+	}
+
+	return users, nil
+}
+
 // Note: Cache functions are now in cache.go to avoid duplicates
 
 // ParseBet parses a bet string and validates it
@@ -768,7 +905,37 @@ func createPerformanceIndexes() error {
 	return nil
 }
 
-// GetLeaderboard executes leaderboard query with direct SQL for reliable operation
+// Prepared statement names for high-frequency queries
+var (
+	preparedStatements = map[string]string{
+		"getUserByID":       "SELECT user_id, chips, total_xp, current_xp, prestige, wins, losses, daily_bonuses_claimed, votes_count, last_hourly, last_daily, last_weekly, last_vote, last_bonus, premium_settings, created_at FROM users WHERE user_id = $1",
+		"leaderboardChips":  "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10",
+		"leaderboardXP":     "SELECT user_id, total_xp FROM users ORDER BY total_xp DESC, user_id LIMIT 10",
+		"leaderboardPrestige": "SELECT user_id, prestige FROM users ORDER BY prestige DESC, user_id LIMIT 10",
+		"updateUserStats":   "UPDATE users SET chips = chips + $2, total_xp = total_xp + $3, current_xp = current_xp + $4, wins = wins + $5, losses = losses + $6 WHERE user_id = $1 RETURNING user_id, chips, total_xp, current_xp, prestige, wins, losses, daily_bonuses_claimed, votes_count, last_hourly, last_daily, last_weekly, last_vote, last_bonus, premium_settings, created_at",
+	}
+)
+
+// initializePreparedStatements creates prepared statements for high-frequency queries
+func initializePreparedStatements() error {
+	if DB == nil {
+		return fmt.Errorf("database not connected")
+	}
+
+	ctx := context.Background()
+	
+	// Prepare high-frequency statements
+	for name, query := range preparedStatements {
+		_, err := DB.Prepare(ctx, name, query)
+		if err != nil {
+			return fmt.Errorf("failed to prepare statement %s: %w", name, err)
+		}
+	}
+	
+	return nil
+}
+
+// GetLeaderboard executes optimized leaderboard query using prepared statements
 func GetLeaderboard(leaderboardType string) (pgx.Rows, error) {
 	if DB == nil {
 		return nil, fmt.Errorf("database not connected")
@@ -778,12 +945,12 @@ func GetLeaderboard(leaderboardType string) (pgx.Rows, error) {
 
 	switch leaderboardType {
 	case "chips":
-		return DB.Query(ctx, "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10")
+		return DB.Query(ctx, "leaderboardChips")
 	case "xp":
-		return DB.Query(ctx, "SELECT user_id, total_xp FROM users ORDER BY total_xp DESC, user_id LIMIT 10")
+		return DB.Query(ctx, "leaderboardXP")
 	case "prestige":
-		return DB.Query(ctx, "SELECT user_id, prestige FROM users ORDER BY prestige DESC, user_id LIMIT 10")
+		return DB.Query(ctx, "leaderboardPrestige")
 	default:
-		return DB.Query(ctx, "SELECT user_id, chips FROM users ORDER BY chips DESC, user_id LIMIT 10")
+		return DB.Query(ctx, "leaderboardChips")
 	}
 }

@@ -16,20 +16,26 @@ type HandData struct {
 	IsActive bool
 }
 
-// CreateBrandedEmbed creates a basic embed with bot branding (matches Python _create_branded_embed)
+// CreateBrandedEmbed creates a basic embed with bot branding using object pool
 func CreateBrandedEmbed(title, description string, color int) *discordgo.MessageEmbed {
-	embed := &discordgo.MessageEmbed{
-		Title:       title,
-		Description: description,
-		Color:       color,
-		Timestamp:   time.Now().Format(time.RFC3339),
-		Footer: &discordgo.MessageEmbedFooter{
-			Text:    "High Roller Club",
-			IconURL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753043816/HRC-final_ymqwfy.png",
-		},
+	embed := GetEmbedFromPool()
+	embed.Title = title
+	embed.Description = description
+	embed.Color = color
+	embed.Timestamp = time.Now().Format(time.RFC3339)
+	embed.Footer = &discordgo.MessageEmbedFooter{
+		Text:    "High Roller Club",
+		IconURL: "https://res.cloudinary.com/dfoeiotel/image/upload/v1753043816/HRC-final_ymqwfy.png",
 	}
 
 	return embed
+}
+
+// ReleaseEmbed returns an embed to the object pool (call this when done with embed)
+func ReleaseEmbed(embed *discordgo.MessageEmbed) {
+	if embed != nil {
+		PutEmbedToPool(embed)
+	}
 }
 
 // InsufficientChipsEmbed creates an embed for insufficient chips (matches Python insufficient_chips_embed)

@@ -709,3 +709,77 @@ func QuickGameResponse(
 	// Use deferred response pattern directly - this is safer for slash commands
 	return QuickDeferredResponse(session, interaction, gameEmbed, gameComponents, gameTitle)
 }
+
+// AsyncTaskManager handles background processing for better responsiveness
+type AsyncTaskManager struct {
+	taskQueue chan func()
+	workers   int
+	done      chan bool
+}
+
+var TaskMgr *AsyncTaskManager
+
+// InitializeAsyncTasks starts the async task processing system
+func InitializeAsyncTasks(workers int, queueSize int) {
+	TaskMgr = &AsyncTaskManager{
+		taskQueue: make(chan func(), queueSize),
+		workers:   workers,
+		done:      make(chan bool),
+	}
+
+	// Start worker goroutines
+	for i := 0; i < workers; i++ {
+		go TaskMgr.worker()
+	}
+}
+
+// worker processes tasks from the queue
+func (atm *AsyncTaskManager) worker() {
+	for {
+		select {
+		case task := <-atm.taskQueue:
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						BotLogf("ASYNC_TASK", "Task panicked: %v", r)
+					}
+				}()
+				task()
+			}()
+		case <-atm.done:
+			return
+		}
+	}
+}
+
+// SubmitTask adds a task to the async processing queue
+func (atm *AsyncTaskManager) SubmitTask(task func()) bool {
+	select {
+	case atm.taskQueue <- task:
+		return true
+	default:
+		// Queue is full, task rejected
+		return false
+	}
+}
+
+// SubmitHighPriorityTask processes a task immediately in a new goroutine
+func (atm *AsyncTaskManager) SubmitHighPriorityTask(task func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				BotLogf("ASYNC_TASK", "High priority task panicked: %v", r)
+			}
+		}()
+		task()
+	}()
+}
+
+// CloseAsyncTasks shuts down the async task system
+func CloseAsyncTasks() {
+	if TaskMgr != nil {
+		for i := 0; i < TaskMgr.workers; i++ {
+			TaskMgr.done <- true
+		}
+	}
+}
