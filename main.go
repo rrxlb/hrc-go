@@ -159,16 +159,8 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 	default:
 	}
 
-	// Set bot status
-	s.UpdateStatusComplex(discordgo.UpdateStatusData{
-		Activities: []*discordgo.Activity{
-			{
-				Name: "/help • hrc.casino",
-				Type: discordgo.ActivityTypeCustom,
-			},
-		},
-		Status: "online",
-	})
+	// Set bot custom status
+	s.UpdateCustomStatus("/help • https://hrc.casino")
 
 	// Register commands first for fastest response
 	if err := registerSlashCommands(s); err != nil {
