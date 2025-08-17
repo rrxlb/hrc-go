@@ -180,7 +180,7 @@ func (am *AchievementManager) loadDefaultAchievements() {
 		{ID: 2, Name: "Getting Started", Description: "Reach 7,500 chips", Icon: "💰", Category: string(CategoryFirstSteps), RequirementType: string(RequirementChips), RequirementValue: 7500, ChipsReward: 150, XPReward: 50, Hidden: false},
 		{ID: 3, Name: "Beginner's Luck", Description: "Win 10 games", Icon: "🍀", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 10, ChipsReward: 200, XPReward: 75, Hidden: false},
 		{ID: 4, Name: "Lucky Streak", Description: "Win 50 games", Icon: "🏅", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 75, ChipsReward: 800, XPReward: 200, Hidden: false},
-		{ID: 5, Name: "Seasoned Player", Description: "Win 100 games", Icon: "🎲", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 150, ChipsReward: 1500, XPReward: 400, Hidden: false},
+		{ID: 5, Name: "Seasoned Player", Description: "Win 100 games", Icon: "<:dicesixfacesthree:1396630430136139907>", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 150, ChipsReward: 1500, XPReward: 400, Hidden: false},
 		{ID: 6, Name: "Gambling Master", Description: "Win 500 games", Icon: "👑", Category: string(CategoryWins), RequirementType: string(RequirementWins), RequirementValue: 750, ChipsReward: 5000, XPReward: 1000, Hidden: false},
 		{ID: 7, Name: "Small Fortune", Description: "Accumulate 35,000 chips", Icon: "💎", Category: string(CategoryWealth), RequirementType: string(RequirementChips), RequirementValue: 35000, ChipsReward: 750, XPReward: 150, Hidden: false},
 		{ID: 8, Name: "Big Money", Description: "Accumulate 150,000 chips", Icon: "💸", Category: string(CategoryWealth), RequirementType: string(RequirementChips), RequirementValue: 150000, ChipsReward: 2500, XPReward: 500, Hidden: false},
@@ -232,7 +232,7 @@ func (am *AchievementManager) loadDefaultAchievements() {
 		{ID: 34, Name: "Dragon's Hoard", Description: "Accumulate 100,000,000 chips", Icon: "🐉", Category: string(CategoryWealth), RequirementType: string(RequirementChips), RequirementValue: 100000000, ChipsReward: 200000, XPReward: 40000, Hidden: true},
 
 		// Gaming - Play frequency achievements
-		{ID: 35, Name: "Casual Gambler", Description: "Play 25 total games", Icon: "🎲", Category: string(CategoryGaming), RequirementType: string(RequirementGamesPlayed), RequirementValue: 25, ChipsReward: 300, XPReward: 100, Hidden: false},
+		{ID: 35, Name: "Casual Gambler", Description: "Play 25 total games", Icon: "<:dicesixfacesfive:1396630450667262138>", Category: string(CategoryGaming), RequirementType: string(RequirementGamesPlayed), RequirementValue: 25, ChipsReward: 300, XPReward: 100, Hidden: false},
 		{ID: 36, Name: "Weekend Warrior", Description: "Play 250 total games", Icon: "⚔️", Category: string(CategoryGaming), RequirementType: string(RequirementGamesPlayed), RequirementValue: 250, ChipsReward: 3000, XPReward: 700, Hidden: false},
 		{ID: 37, Name: "No Life", Description: "Play 5,000 total games", Icon: "💀", Category: string(CategoryGaming), RequirementType: string(RequirementGamesPlayed), RequirementValue: 5000, ChipsReward: 35000, XPReward: 8000, Hidden: false},
 		{ID: 38, Name: "Eternal Player", Description: "Play 10,000 total games", Icon: "♾️", Category: string(CategoryGaming), RequirementType: string(RequirementGamesPlayed), RequirementValue: 10000, ChipsReward: 75000, XPReward: 18000, Hidden: true},
