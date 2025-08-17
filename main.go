@@ -159,12 +159,12 @@ func onReady(s *discordgo.Session, event *discordgo.Ready) {
 	default:
 	}
 
-	// Set bot presence
+	// Set bot status
 	s.UpdateStatusComplex(discordgo.UpdateStatusData{
 		Activities: []*discordgo.Activity{
 			{
-				Name: "/help for commands",
-				Type: discordgo.ActivityTypeListening,
+				Name: "/help • hrc.casino",
+				Type: discordgo.ActivityTypeCustom,
 			},
 		},
 		Status: "online",
@@ -276,6 +276,10 @@ func registerSlashCommands(s *discordgo.Session) error {
 		{
 			Name:        "premium",
 			Description: "Manage your premium features",
+		},
+		{
+			Name:        "invite",
+			Description: "Get the invite link to add the bot to your server",
 		},
 		{
 			Name:        "prestige",
@@ -452,6 +456,8 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			handlePingCommand(s, i)
 		case "info":
 			handleInfoCommand(s, i)
+		case "invite":
+			handleInviteCommand(s, i)
 		case "help":
 			handleHelpCommand(s, i)
 		case "profile":
@@ -611,6 +617,35 @@ func handleInfoCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}}})
 }
 
+func handleInviteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	embed := utils.CreateBrandedEmbed("🔗 Invite High Rollers Club Bot", "Add the bot to your own server to start the journey of becoming a High Roller!", utils.BotColor)
+	embed.Description = "Click the button below to invite the bot to your server. The bot will have all the necessary permissions to run casino games and manage user data."
+	embed.Fields = []*discordgo.MessageEmbedField{
+		{Name: "What you'll get:", Value: "• All casino games (Blackjack, Slots, Roulette, and more!)\n• User profiles and ranking system\n• Bonus rewards and achievements\n• Premium features support", Inline: false},
+	}
+
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.Button{
+					Label: "Add Bot to Server",
+					Style: discordgo.LinkButton,
+					URL:   "https://discord.com/oauth2/authorize?client_id=1396564026233983108&permissions=274878253072&integration_type=0&scope=applications.commands+bot",
+					Emoji: &discordgo.ComponentEmoji{Name: "🤖"},
+				},
+			},
+		},
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: components,
+		},
+	})
+}
+
 func handleProfileCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Determine whose profile to show
 	targetUserID := i.Member.User.ID
@@ -715,7 +750,7 @@ func handleLeaderboardCommand(s *discordgo.Session, i *discordgo.InteractionCrea
 	if len(opts) > 0 {
 		sub = opts[0].Name
 	}
-	
+
 	// Optimized leaderboard query with prepared statements
 	title := map[string]string{"chips": "High Rollers", "xp": "Total XP", "prestige": "Prestige"}[sub]
 	if utils.DB == nil {
@@ -734,10 +769,10 @@ func handleLeaderboardCommand(s *discordgo.Session, i *discordgo.InteractionCrea
 		return
 	}
 	defer rows.Close()
-	
+
 	lines := utils.GetStringSliceFromPool()
 	defer utils.PutStringSliceToPool(lines)
-	
+
 	idx := 1
 	for rows.Next() {
 		var uid int64
@@ -762,7 +797,7 @@ func handleLeaderboardCommand(s *discordgo.Session, i *discordgo.InteractionCrea
 	if len(lines) == 0 {
 		lines = append(lines, "No data")
 	}
-	
+
 	embed := utils.CreateBrandedEmbed(title, strings.Join(lines, "\n"), utils.BotColor)
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}}})
 	utils.ReleaseEmbed(embed)
