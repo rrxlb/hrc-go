@@ -155,16 +155,12 @@ func (bg *BlackjackGame) StartGame() error {
 		err = utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 5*time.Second)
 		if err == nil {
 			bg.State = StateActive
-		} else {
-			utils.BotLogf("BLACKJACK", "Failed to update deferred interaction for game %s: %v", bg.GameID, err)
 		}
 	} else {
 		// No prior response; send initial response now (fallback case)
 		err = utils.SendInteractionResponseWithTimeout(bg.Session, bg.Interaction, embed, components, false, 5*time.Second)
 		if err == nil {
 			bg.State = StateActive
-		} else {
-			utils.BotLogf("BLACKJACK", "Failed to send initial interaction response for game %s: %v", bg.GameID, err)
 		}
 	}
 
@@ -371,13 +367,11 @@ func (bg *BlackjackGame) finishGame() error {
 	// Immediately respond to the interaction to prevent timeout
 	if err := bg.sendDealerPlayingResponse(); err != nil {
 		// Continue even if immediate response fails
-		utils.BotLogf("BLACKJACK", "Failed to send dealer playing response for game %s: %v", bg.GameID, err)
 	}
 
 	// Play dealer hand with animation (now non-blocking)
 	if err := bg.playDealerHand(); err != nil {
 		// Continue with game completion even if animation fails
-		utils.BotLogf("BLACKJACK", "Failed to start dealer animation for game %s: %v", bg.GameID, err)
 	}
 
 	// Calculate results for each hand
@@ -504,12 +498,10 @@ func (bg *BlackjackGame) playDealerHandSync() error {
 		// Update display with new card
 		if err := bg.updateDealerAnimation(); err != nil {
 			// Continue even if display update fails
-			utils.BotLogf("BLACKJACK", "Failed to update dealer animation for game %s: %v", bg.GameID, err)
 		}
 	}
 
 	if cardCount >= maxCards {
-		utils.BotLogf("BLACKJACK", "Dealer hand hit max cards limit for game %s", bg.GameID)
 		return fmt.Errorf("dealer hand exceeded maximum cards")
 	}
 
@@ -723,7 +715,6 @@ func (bg *BlackjackGame) updateGameStateRevealing() error {
 			// Successful fallback
 			err = nil
 		} else {
-			// Log webhook expiration for debugging
 		}
 	}
 
@@ -890,7 +881,6 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 		// Add panic recovery to prevent silent failures that leave "Bot is thinking..." state
 		defer func() {
 			if r := recover(); r != nil {
-				utils.BotLogf("BLACKJACK", "Panic in blackjack command handler: %v", r)
 				respondWithDeferredError(sess, inter, "An unexpected error occurred. Please try again.")
 			}
 		}()
@@ -901,7 +891,6 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 			time.Sleep(10 * time.Second) // 10 second timeout for the entire operation
 			select {
 			case done <- true:
-				utils.BotLogf("BLACKJACK", "Blackjack command timed out for user %s", inter.Member.User.ID)
 				respondWithDeferredError(sess, inter, "Command timed out. Please try again.")
 			default:
 				// Operation completed before timeout
@@ -914,7 +903,6 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 
 		// Safety checks for interaction data
 		if inter == nil || inter.Member == nil || inter.Member.User == nil {
-			utils.BotLogf("BLACKJACK", "Invalid interaction data received")
 			return
 		}
 
@@ -924,7 +912,7 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 			respondWithDeferredError(sess, inter, "No bet amount provided")
 			return
 		}
-		
+
 		betOption := options[0]
 		betStr := betOption.StringValue()
 
@@ -975,7 +963,7 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 			respondWithDeferredError(sess, inter, "Failed to create game instance")
 			return
 		}
-		
+
 		game.UserData = user
 		// Mark that the interaction was deferred
 		game.State = StateDeferred
@@ -985,11 +973,7 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 		ActiveGames[game.GameID] = game
 		gamesMutex.Unlock()
 
-		// Log game creation for debugging
-		utils.BotLogf("BLACKJACK", "Starting game %s for user %d with bet %d", game.GameID, userID, bet)
-
 		if err := game.StartGame(); err != nil {
-			utils.BotLogf("BLACKJACK", "Failed to start game %s: %v", game.GameID, err)
 			respondWithDeferredError(sess, inter, "Failed to start game: "+err.Error())
 
 			// Clean up failed game
@@ -999,7 +983,6 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 			return
 		}
 
-		utils.BotLogf("BLACKJACK", "Successfully started game %s for user %d", game.GameID, userID)
 	}(s, i)
 }
 
@@ -1073,7 +1056,6 @@ func (bg *BlackjackGame) isWebhookExpired(err error) bool {
 func (bg *BlackjackGame) fallbackEdit(embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
 	// Check circuit breaker first - fast fail if too many recent failures
 	if !utils.WebhookCircuitBreaker.CanExecute() {
-		utils.BotLogf("BLACKJACK", "Fallback edit blocked by circuit breaker for game %s", bg.GameID)
 		return fmt.Errorf("fallback edit circuit breaker open")
 	}
 
