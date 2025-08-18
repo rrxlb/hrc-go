@@ -270,8 +270,10 @@ func registerSlashCommands(s *discordgo.Session) error {
 			Description: "Manage your premium features",
 		},
 		{
-			Name:        "invite",
-			Description: "Get the invite link to add the bot to your server",
+			Name:                     "invite",
+			Description:              "Get the invite link to add the bot to your server",
+			DefaultMemberPermissions: func() *int64 { i := int64(0); return &i }(),
+			DMPermission:             func() *bool { b := true; return &b }(),
 		},
 		{
 			Name:        "prestige",
@@ -360,12 +362,26 @@ func registerSlashCommands(s *discordgo.Session) error {
 	// Global registration only (eliminates duplicate commands)
 	log.Println("📡 Registering commands globally (may take up to 1 hour to propagate)...")
 
+	// First, get current commands to log what's being replaced
+	currentCommands, err := s.ApplicationCommands(s.State.User.ID, "")
+	if err == nil {
+		log.Printf("🔍 Current registered commands: %d", len(currentCommands))
+		for _, cmd := range currentCommands {
+			log.Printf("  - %s: %s", cmd.Name, cmd.Description)
+		}
+	}
+
 	registeredCommands, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", globalCommands)
 	if err != nil {
 		return fmt.Errorf("global bulk overwrite failed: %w", err)
 	}
 
 	log.Printf("✅ Successfully registered %d commands", len(registeredCommands))
+	
+	// Log what was actually registered
+	for _, cmd := range registeredCommands {
+		log.Printf("  ✓ %s: %s", cmd.Name, cmd.Description)
+	}
 
 	// Verify registration was successful
 	if len(registeredCommands) != len(globalCommands) {
