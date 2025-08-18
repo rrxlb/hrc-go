@@ -134,12 +134,6 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 
-		// Send initial spinning state immediately
-		initial := game.buildEmbed("", 0, 0, false, 0)
-		if err := utils.UpdateInteractionResponse(s, i, initial, nil); err != nil {
-			return
-		}
-
 		// Contribute to jackpot asynchronously to avoid blocking main interaction flow
 		if utils.JackpotMgr != nil {
 			go func(b int64) {
@@ -148,15 +142,7 @@ func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			}(adjusted)
 		}
 
-		// Fetch message ID for animation
-		if orig, err := s.InteractionResponse(i.Interaction); err == nil {
-			game.MessageID = orig.ID
-			game.ChannelID = orig.ChannelID
-		} else {
-			return
-		}
-
-		// Start play loop asynchronously
+		// Start play loop asynchronously - this will handle the initial response
 		game.play()
 	}()
 }
@@ -193,15 +179,22 @@ func (g *Game) play() {
 		}
 		return 0
 	}())
-	// If we don't already have a message (e.g., original edit failed), attempt a followup now
-	if g.MessageID == "" || g.ChannelID == "" {
-		embed := g.buildEmbed("", 0, 0, false, 0)
-		msg, err := g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Embeds: []*discordgo.MessageEmbed{embed}})
+	// Handle initial deferred response with spinning state
+	initial := g.buildEmbed("", 0, 0, false, 0)
+	if err := utils.UpdateInteractionResponse(g.Session, g.Interaction, initial, nil); err != nil {
+		// Fallback to followup message if deferred response fails
+		msg, err := g.Session.FollowupMessageCreate(g.Interaction.Interaction, true, &discordgo.WebhookParams{Embeds: []*discordgo.MessageEmbed{initial}})
 		if err != nil {
 			return
 		}
 		g.MessageID = msg.ID
 		g.ChannelID = msg.ChannelID
+	} else {
+		// Get message ID from successful deferred response
+		if orig, err := g.Session.InteractionResponse(g.Interaction.Interaction); err == nil {
+			g.MessageID = orig.ID
+			g.ChannelID = orig.ChannelID
+		}
 	}
 	final := g.createReels()
 	g.animateSpin(final)
