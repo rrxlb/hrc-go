@@ -552,11 +552,20 @@ func (g *Game) animateSpin(final [][]string) {
 		embed := g.buildEmbed(formatReels(frame), 0, 0, false, 0)
 		embeds := []*discordgo.MessageEmbed{embed}
 
-		// Update message asynchronously to avoid blocking animation timing
-		go func(embeds []*discordgo.MessageEmbed) {
-			defer func() { recover() }()
-			g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds})
-		}(embeds)
+		// Update message - async for all frames except the last one to prevent race condition
+		if step == totalSteps-1 {
+			// Final frame: synchronous to ensure it completes before results are shown
+			func() {
+				defer func() { recover() }()
+				g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds})
+			}()
+		} else {
+			// All other frames: async to avoid blocking animation timing
+			go func(embeds []*discordgo.MessageEmbed) {
+				defer func() { recover() }()
+				g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds})
+			}(embeds)
+		}
 
 		// Calculate delays for each spinning column
 		maxDelay := time.Duration(0)
