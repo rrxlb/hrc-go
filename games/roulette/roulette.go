@@ -29,15 +29,36 @@ func RegisterRouletteCommand() *discordgo.ApplicationCommand {
 }
 
 func HandleRouletteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID, _ := utils.ParseUserID(i.Member.User.ID)
-	if _, exists := activeRouletteGames[userID]; exists {
-		_ = utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Roulette", "You already have an active roulette game.", 0xFF0000), nil, true)
+	// Add panic recovery to prevent silent failures
+	defer func() {
+		if r := recover(); r != nil {
+			utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Roulette", "An unexpected error occurred. Please try again.", 0xFF0000), nil, true)
+		}
+	}()
+
+	// Fast validation checks before any processing
+	if i == nil || i.Member == nil || i.Member.User == nil {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Roulette", "Invalid user data", 0xFF0000), nil, true)
 		return
 	}
+
+	userID, err := utils.ParseUserID(i.Member.User.ID)
+	if err != nil {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Roulette", "Failed to parse user ID", 0xFF0000), nil, true)
+		return
+	}
+
+	// Check for existing game immediately
+	if _, exists := activeRouletteGames[userID]; exists {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Roulette", "You already have an active roulette game.", 0xFF0000), nil, true)
+		return
+	}
+
+	// Create and start game
 	game := &RouletteGame{BaseGame: utils.NewBaseGame(s, i, 0, "roulette"), Bets: make(map[string]int64), State: "betting"}
 	activeRouletteGames[userID] = game
 	embed := utils.RouletteGameEmbed("betting", game.Bets, 0, "", 0, 0, 0)
-	if err := utils.SendInteractionResponse(s, i, embed, game.buildComponents(), false); err != nil {
+	if err := utils.SendInteractionResponseWithTimeout(s, i, embed, game.buildComponents(), false, 3*time.Second); err != nil {
 		// Clean up so user can retry
 		delete(activeRouletteGames, userID)
 		// Attempt a simple ephemeral fallback if interaction still valid
@@ -88,7 +109,7 @@ func HandleRouletteInteraction(s *discordgo.Session, i *discordgo.InteractionCre
 			return
 		}
 		game.State = "spinning"
-		utils.UpdateComponentInteraction(s, i, utils.RouletteGameEmbed("spinning", game.Bets, 0, "", 0, 0, 0), game.buildComponents())
+		utils.UpdateComponentInteractionWithTimeout(s, i, utils.RouletteGameEmbed("spinning", game.Bets, 0, "", 0, 0, 0), game.buildComponents(), 3*time.Second)
 		go game.resolveSpin(s)
 		return
 	}
@@ -129,6 +150,14 @@ func HandleRouletteInteraction(s *discordgo.Session, i *discordgo.InteractionCre
 }
 
 func (rg *RouletteGame) resolveSpin(s *discordgo.Session) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Silently handle panics to prevent affecting main game state
+			delete(activeRouletteGames, rg.UserID)
+		}
+	}()
+
+	// Animation delay preserved but game completion is now async
 	time.Sleep(2 * time.Second)
 	rand.Seed(time.Now().UnixNano())
 	num := rand.Intn(37)
@@ -155,7 +184,23 @@ func (rg *RouletteGame) resolveSpin(s *discordgo.Session) {
 		xpGain = 0
 	}
 	rg.State = "final"
-	utils.EditOriginalInteraction(s, rg.BaseGame.Interaction, utils.RouletteGameEmbed("final", rg.Bets, num, color, profit, newBalance, xpGain), nil)
+
+	// Update with timeout protection to avoid blocking
+	go func() {
+		defer func() { recover() }()
+		// Use existing function with async wrapper for timeout protection
+		done := make(chan error, 1)
+		go func() {
+			done <- utils.EditOriginalInteraction(s, rg.BaseGame.Interaction, utils.RouletteGameEmbed("final", rg.Bets, num, color, profit, newBalance, xpGain), nil)
+		}()
+		select {
+		case <-done:
+			// Update completed successfully
+		case <-time.After(3 * time.Second):
+			// Timeout - abandon update to prevent blocking
+		}
+	}()
+
 	delete(activeRouletteGames, rg.UserID)
 }
 

@@ -78,37 +78,85 @@ func RegisterCrapsCommand() *discordgo.ApplicationCommand {
 
 // HandleCrapsCommand starts a new craps game
 func HandleCrapsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	userID, _ := utils.ParseUserID(i.Member.User.ID)
+	// Add panic recovery to prevent silent failures
+	defer func() {
+		if r := recover(); r != nil {
+			utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Craps", "An unexpected error occurred. Please try again.", 0xFF0000), nil, true)
+		}
+	}()
+
+	// Fast validation checks before any processing
+	if i == nil || i.Member == nil || i.Member.User == nil {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Craps", "Invalid user data", 0xFF0000), nil, true)
+		return
+	}
+
+	userID, err := utils.ParseUserID(i.Member.User.ID)
+	if err != nil {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Craps", "Failed to parse user ID", 0xFF0000), nil, true)
+		return
+	}
+
+	// Check for existing game immediately
 	if _, exists := activeGames[userID]; exists {
 		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Craps", "You already have an active Craps game.", 0xFF0000), nil, true)
 		return
 	}
+
+	// Parse bet amount immediately to fail fast on invalid input
+	options := i.ApplicationCommandData().Options
+	if len(options) == 0 {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Craps", "No bet amount provided", 0xFF0000), nil, true)
+		return
+	}
+
 	betStr := ""
-	for _, opt := range i.ApplicationCommandData().Options {
+	for _, opt := range options {
 		if opt.Name == "bet" {
 			betStr = opt.StringValue()
+			break
 		}
 	}
+
+	if betStr == "" {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Craps", "No bet amount provided", 0xFF0000), nil, true)
+		return
+	}
+
+	// Get user data
 	user, err := utils.GetCachedUser(userID)
 	if err != nil {
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", "Failed to load user.", 0xFF0000), nil, true)
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Craps", "Failed to load user data", 0xFF0000), nil, true)
 		return
 	}
+
+	// Parse and validate bet
 	betAmount, err := utils.ParseBet(betStr, user.Chips)
-	if err != nil || betAmount <= 0 {
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", "Invalid bet amount.", 0xFF0000), nil, true)
+	if err != nil {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Craps", "Invalid bet amount: "+err.Error(), 0xFF0000), nil, true)
 		return
 	}
+
+	if betAmount <= 0 {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Craps", "Bet amount must be greater than 0", 0xFF0000), nil, true)
+		return
+	}
+
+	// Create and validate game
 	game := &Game{BaseGame: utils.NewBaseGame(s, i, betAmount, "craps"), Phase: phaseComeOut, Bets: map[string]int64{"pass_line": betAmount}, ComePoints: map[int]int64{}, CreatedAt: time.Now(), rng: rand.New(rand.NewSource(time.Now().UnixNano())), PendingDecisions: map[string]int64{}, LastAction: time.Now()}
 	if err := game.BaseGame.ValidateBet(); err != nil {
-		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", err.Error(), 0xFF0000), nil, true)
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Craps", err.Error(), 0xFF0000), nil, true)
 		return
 	}
+
+	// Store game and send response
 	activeGames[userID] = game
 	embed := game.buildEmbed("Game started. Place additional bets with buttons.", "Waiting to roll...")
 	components := game.components()
 	utils.SendInteractionResponse(s, i, embed, components, false)
-	go game.watchTimeout(s)
+
+	// Start simplified timeout watcher asynchronously
+	go game.startTimeoutWatcher(s)
 }
 
 // HandleCrapsButton processes button interactions
@@ -574,7 +622,7 @@ func (g *Game) updateMessage(s *discordgo.Session, i *discordgo.InteractionCreat
 	if gameOver {
 		components = []discordgo.MessageComponent{}
 	}
-	if err := utils.UpdateComponentInteraction(s, i, embed, components); err != nil {
+	if err := utils.UpdateComponentInteractionWithTimeout(s, i, embed, components, 3*time.Second); err != nil {
 		// fallback edit
 		embeds := []*discordgo.MessageEmbed{embed}
 		edit := &discordgo.MessageEdit{ID: i.Message.ID, Channel: i.ChannelID, Embeds: &embeds, Components: &components}
@@ -846,19 +894,30 @@ func (g *Game) updateLastAction() {
 	g.LastAction = time.Now()
 }
 
-// watchTimeout monitors inactivity and marks the game as timed out
-func (g *Game) watchTimeout(s *discordgo.Session) {
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-	for {
-		<-ticker.C
-		if g.BaseGame.IsGameOver() {
-			return
+// startTimeoutWatcher starts a simplified timeout watcher to avoid conflicts with Discord interactions
+func (g *Game) startTimeoutWatcher(s *discordgo.Session) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Silently handle panics in timeout watcher to avoid affecting main game
 		}
-		if !g.TimedOut && time.Since(g.LastAction) > inactivityTimeout {
-			g.TimedOut = true
-			g.TimedOutAt = time.Now()
-			// Update original message to reflect timeout
+	}()
+
+	// Use a single timeout check instead of continuous polling to reduce complexity
+	time.Sleep(inactivityTimeout)
+
+	// Check if game is still active and hasn't had recent activity
+	if g.BaseGame.IsGameOver() || g.TimedOut {
+		return
+	}
+
+	if time.Since(g.LastAction) > inactivityTimeout {
+		// Mark as timed out but don't interfere with ongoing interactions
+		g.TimedOut = true
+		g.TimedOutAt = time.Now()
+
+		// Update message asynchronously to avoid blocking
+		go func() {
+			defer func() { recover() }()
 			outcome := "Game timed out due to inactivity. Press Resume to continue."
 			rollDisp := g.LastRollDisplay
 			if rollDisp == "" {
@@ -866,19 +925,24 @@ func (g *Game) watchTimeout(s *discordgo.Session) {
 			}
 			embed := g.buildEmbed(outcome, rollDisp)
 			g.BaseGame.UpdateOriginalResponse(embed, g.components())
-		}
-		if g.TimedOut && !g.AutoClosed && !g.TimedOutAt.IsZero() && time.Since(g.TimedOutAt) > hardTimeout {
-			g.AutoClosed = true
-			g.endGame()
-			delete(activeGames, g.BaseGame.UserID)
-			outcome := "Game auto-closed after extended inactivity."
-			rollDisp := g.LastRollDisplay
-			if rollDisp == "" {
-				rollDisp = "Waiting to roll..."
+		}()
+
+		// Schedule final cleanup without continuous polling
+		go func() {
+			defer func() { recover() }()
+			time.Sleep(hardTimeout)
+			if g.TimedOut && !g.AutoClosed && !g.BaseGame.IsGameOver() {
+				g.AutoClosed = true
+				g.endGame()
+				delete(activeGames, g.BaseGame.UserID)
+				outcome := "Game auto-closed after extended inactivity."
+				rollDisp := g.LastRollDisplay
+				if rollDisp == "" {
+					rollDisp = "Waiting to roll..."
+				}
+				embed := g.buildEmbed(outcome, rollDisp)
+				g.BaseGame.UpdateOriginalResponse(embed, g.components())
 			}
-			embed := g.buildEmbed(outcome, rollDisp)
-			g.BaseGame.UpdateOriginalResponse(embed, g.components())
-			return
-		}
+		}()
 	}
 }

@@ -72,12 +72,46 @@ func RegisterMinesCommand() *discordgo.ApplicationCommand {
 
 // HandleMinesCommand handles the /mines slash command
 func HandleMinesCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	// Fast validation before any processing
+	if i == nil || i.Member == nil || i.Member.User == nil {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Mines", "Invalid user data", 0xE74C3C), nil, true)
+		return
+	}
+
+	// Parse inputs first to fail fast on invalid data
+	options := i.ApplicationCommandData().Options
+	if len(options) < 2 {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Mines", "Missing required parameters", 0xE74C3C), nil, true)
+		return
+	}
+
+	var betStr string
+	var minesCount int
+	for _, opt := range options {
+		switch opt.Name {
+		case "bet":
+			betStr = strings.TrimSpace(opt.StringValue())
+		case "mines":
+			minesCount = int(opt.IntValue())
+		}
+	}
+
+	if minesCount < 1 || minesCount > 19 {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Mines", "Mines count must be between 1 and 19.", 0xE74C3C), nil, true)
+		return
+	}
+
 	// Prevent multiple games per user
-	uid, _ := utils.ParseUserID(i.Member.User.ID)
+	uid, err := utils.ParseUserID(i.Member.User.ID)
+	if err != nil {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Mines", "Failed to parse user ID", 0xE74C3C), nil, true)
+		return
+	}
+
 	active.RLock()
 	if _, exists := active.byUser[uid]; exists {
 		active.RUnlock()
-		_ = utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Error", "You already have an active game.", 0xE74C3C), nil, true)
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Mines", "You already have an active game.", 0xE74C3C), nil, true)
 		return
 	}
 	active.RUnlock()
@@ -86,21 +120,7 @@ func HandleMinesCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// Parse inputs
-	var betStr string
-	var minesCount int
-	for _, opt := range i.ApplicationCommandData().Options {
-		switch opt.Name {
-		case "bet":
-			betStr = strings.TrimSpace(opt.StringValue())
-		case "mines":
-			minesCount = int(opt.IntValue())
-		}
-	}
-	if minesCount < 1 || minesCount > 19 {
-		_ = utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Mines", "Mines count must be between 1 and 19.", 0xE74C3C), nil)
-		return
-	}
+	// Input parsing already done above
 
 	user, err := utils.GetCachedUser(uid)
 	if err != nil {

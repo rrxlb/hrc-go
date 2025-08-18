@@ -93,19 +93,33 @@ func RegisterHorseRacingCommand() *discordgo.ApplicationCommand {
 
 // Handle slash command
 func HandleHorseRacingCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
+	// Fast validation before deferring
+	if i == nil || i.Member == nil || i.Member.User == nil {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("🏇 Derby", "Invalid user data", 0xE74C3C), nil, true)
 		return
 	}
 
 	chID := i.ChannelID
-	userID, _ := utils.ParseUserID(i.Member.User.ID)
-
-	races.Lock()
-	if _, exists := races.byChannel[chID]; exists {
-		races.Unlock()
-		_ = utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("🏇 Derby", "There is already an active race in this channel.", 0xE74C3C), nil)
+	userID, err := utils.ParseUserID(i.Member.User.ID)
+	if err != nil {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("🏇 Derby", "Failed to parse user ID", 0xE74C3C), nil, true)
 		return
 	}
+
+	// Check for existing race before deferring
+	races.RLock()
+	if _, exists := races.byChannel[chID]; exists {
+		races.RUnlock()
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("🏇 Derby", "There is already an active race in this channel.", 0xE74C3C), nil, true)
+		return
+	}
+	races.RUnlock()
+
+	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
+		return
+	}
+
+	races.Lock()
 	race := &Race{ChannelID: chID, Initiator: userID, InitiatorName: i.Member.User.Username, Participants: map[int64]string{userID: i.Member.User.Mention()}, Status: StatusLobby, CreatedAt: time.Now()}
 	race.Horses = pickHorses(6)
 	races.byChannel[chID] = race
