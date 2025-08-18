@@ -65,54 +65,100 @@ func RegisterSlotsCommand() *discordgo.ApplicationCommand {
 
 // HandleSlotsCommand handles /slots
 func HandleSlotsCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
+	// Add panic recovery to prevent silent failures
+	defer func() {
+		if r := recover(); r != nil {
+			utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", "An unexpected error occurred. Please try again.", 0xFF0000), nil, true)
+		}
+	}()
+
+	// Fast validation checks before any Discord API calls
+	if i == nil || i.Member == nil || i.Member.User == nil {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", "Invalid user data", 0xFF0000), nil, true)
 		return
 	}
 
-	betStr := i.ApplicationCommandData().Options[0].StringValue()
-	userID, _ := utils.ParseUserID(i.Member.User.ID)
+	// Parse bet amount immediately to fail fast on invalid input
+	options := i.ApplicationCommandData().Options
+	if len(options) == 0 {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", "No bet amount provided", 0xFF0000), nil, true)
+		return
+	}
+
+	betStr := options[0].StringValue()
+	userID, err := utils.ParseUserID(i.Member.User.ID)
+	if err != nil {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", "Failed to parse user ID", 0xFF0000), nil, true)
+		return
+	}
+
+	// Get user data
 	user, err := utils.GetCachedUser(userID)
 	if err != nil {
-		utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", "Error fetching user.", 0xFF0000), nil)
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", "Error fetching user data", 0xFF0000), nil, true)
 		return
 	}
+
+	// Parse and validate bet
 	bet, err := utils.ParseBet(betStr, user.Chips)
 	if err != nil {
-		utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet error: %s", err.Error()), 0xFF0000), nil)
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet error: %s", err.Error()), 0xFF0000), nil, true)
 		return
 	}
+
 	adjusted, note := normalizeBetForPaylines(bet, user.Chips)
 	if adjusted == 0 {
-		utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet must be at least %d & divisible by %d", minBet, payLines), 0xFF0000), nil)
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", fmt.Sprintf("Bet must be at least %d & divisible by %d", minBet, payLines), 0xFF0000), nil, true)
 		return
 	}
-	game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, BetNote: note, Rand: rand.New(rand.NewSource(time.Now().UnixNano())), UsedOriginal: true}
-	game.BaseGame.CountWinLossMinRatio = 0.20
-	if err := game.ValidateBet(); err != nil {
-		utils.EditOriginalInteraction(s, i, utils.CreateBrandedEmbed("Slots", err.Error(), 0xFF0000), nil)
+
+	// Defer only after validation passes
+	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
+		utils.SendInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", "Failed to acknowledge command", 0xFF0000), nil, true)
 		return
 	}
-	initial := game.buildEmbed("", 0, 0, false, 0)
-	if err := utils.EditOriginalInteraction(s, i, initial, nil); err != nil {
-		return
-	}
-	// Contribute to jackpot asynchronously to avoid blocking main interaction flow
-	if utils.JackpotMgr != nil {
-		go func(b int64) {
-			defer func() { recover() }()
-			utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, b)
-		}(adjusted)
-	}
-	// Fetch message ID for animation
-	if orig, err := s.InteractionResponse(i.Interaction); err == nil {
-		game.MessageID = orig.ID
-		game.ChannelID = orig.ChannelID
-		// message id captured
-	} else {
-		return
-	}
-	// start play loop
-	game.play()
+
+	// Create game and start playing asynchronously
+	go func() {
+		// Add panic recovery for the goroutine
+		defer func() {
+			if r := recover(); r != nil {
+				utils.UpdateInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", "An unexpected error occurred. Please try again.", 0xFF0000), nil)
+			}
+		}()
+
+		game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, BetNote: note, Rand: rand.New(rand.NewSource(time.Now().UnixNano())), UsedOriginal: true}
+		game.BaseGame.CountWinLossMinRatio = 0.20
+		if err := game.ValidateBet(); err != nil {
+			utils.UpdateInteractionResponse(s, i, utils.CreateBrandedEmbed("Slots", err.Error(), 0xFF0000), nil)
+			return
+		}
+
+		// Send initial spinning state immediately
+		initial := game.buildEmbed("", 0, 0, false, 0)
+		if err := utils.UpdateInteractionResponse(s, i, initial, nil); err != nil {
+			return
+		}
+
+		// Contribute to jackpot asynchronously to avoid blocking main interaction flow
+		if utils.JackpotMgr != nil {
+			go func(b int64) {
+				defer func() { recover() }()
+				utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, b)
+			}(adjusted)
+		}
+
+		// Fetch message ID for animation
+		if orig, err := s.InteractionResponse(i.Interaction); err == nil {
+			game.MessageID = orig.ID
+			game.ChannelID = orig.ChannelID
+		} else {
+			return
+		}
+
+		// Start play loop asynchronously
+		game.play()
+	}()
 }
 
 // normalize bet to multiple of paylines
@@ -451,95 +497,107 @@ func (g *Game) calculateColumnDeceleration(column, step, totalSteps, lockStep in
 func (g *Game) animateSpin(final [][]string) {
 	g.Phase = phaseSpinning
 
-	// Enhanced animation parameters
-	totalSteps := 20
-	col1Lock := 8
-	col2Lock := 14
-	col3Lock := 18
-	stripLen := 30
+	// Run animation asynchronously to avoid blocking the game completion
+	go func() {
+		defer func() { recover() }() // Prevent animation panics from affecting game state
 
-	// Generate realistic reel strips for each column
-	strips := make([][]string, 3)
-	for c := 0; c < 3; c++ {
-		finalColumn := []string{final[0][c], final[1][c], final[2][c]}
-		strips[c] = g.generateReelStrip(c, finalColumn, stripLen)
-	}
+		// Enhanced animation parameters
+		totalSteps := 20
+		col1Lock := 8
+		col2Lock := 14
+		col3Lock := 18
+		stripLen := 30
 
-	// Track position for each column
-	positions := []int{0, 0, 0}
-	columnLocked := []bool{false, false, false}
-	lockSteps := []int{col1Lock, col2Lock, col3Lock}
-
-	makeFrame := func(step int) [][]string {
-		frame := make([][]string, 3)
-		for r := 0; r < 3; r++ {
-			frame[r] = make([]string, 3)
+		// Generate realistic reel strips for each column
+		strips := make([][]string, 3)
+		for c := 0; c < 3; c++ {
+			finalColumn := []string{final[0][c], final[1][c], final[2][c]}
+			strips[c] = g.generateReelStrip(c, finalColumn, stripLen)
 		}
 
-		for c := 0; c < 3; c++ {
-			var colSyms []string
+		// Track position for each column
+		positions := []int{0, 0, 0}
+		columnLocked := []bool{false, false, false}
+		lockSteps := []int{col1Lock, col2Lock, col3Lock}
 
-			if columnLocked[c] {
-				// Column is locked, show final result
-				colSyms = []string{final[0][c], final[1][c], final[2][c]}
-			} else {
-				// Column is still spinning
-				if step >= lockSteps[c] {
-					// Time to lock this column
-					columnLocked[c] = true
+		makeFrame := func(step int) [][]string {
+			frame := make([][]string, 3)
+			for r := 0; r < 3; r++ {
+				frame[r] = make([]string, 3)
+			}
+
+			for c := 0; c < 3; c++ {
+				var colSyms []string
+
+				if columnLocked[c] {
+					// Column is locked, show final result
 					colSyms = []string{final[0][c], final[1][c], final[2][c]}
 				} else {
-					// Show current position in the strip
-					pos := positions[c]
-					colSyms = []string{
-						strips[c][pos%stripLen],
-						strips[c][(pos+1)%stripLen],
-						strips[c][(pos+2)%stripLen],
+					// Column is still spinning
+					if step >= lockSteps[c] {
+						// Time to lock this column
+						columnLocked[c] = true
+						colSyms = []string{final[0][c], final[1][c], final[2][c]}
+					} else {
+						// Show current position in the strip
+						pos := positions[c]
+						colSyms = []string{
+							strips[c][pos%stripLen],
+							strips[c][(pos+1)%stripLen],
+							strips[c][(pos+2)%stripLen],
+						}
+					}
+				}
+
+				for r := 0; r < 3; r++ {
+					frame[r][c] = colSyms[r]
+				}
+			}
+
+			return frame
+		}
+
+		// Animation loop with async message updates
+		for step := 0; step < totalSteps; step++ {
+			frame := makeFrame(step)
+			embed := g.buildEmbed(formatReels(frame), 0, 0, false, 0)
+			embeds := []*discordgo.MessageEmbed{embed}
+
+			// Update message asynchronously to avoid blocking animation timing
+			go func(embeds []*discordgo.MessageEmbed) {
+				defer func() { recover() }()
+				g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds})
+			}(embeds)
+
+			// Calculate delays for each spinning column
+			maxDelay := time.Duration(0)
+			for c := 0; c < 3; c++ {
+				if !columnLocked[c] {
+					delay := g.calculateColumnDeceleration(c, step, totalSteps, lockSteps[c])
+					if delay > maxDelay {
+						maxDelay = delay
+					}
+
+					// Advance position if column is still spinning
+					if step < lockSteps[c]-1 {
+						// Normal advancement
+						positions[c]++
+					} else if step == lockSteps[c]-1 {
+						// Position to show final result on next frame
+						positions[c] = stripLen - 3
 					}
 				}
 			}
 
-			for r := 0; r < 3; r++ {
-				frame[r][c] = colSyms[r]
+			// Use the maximum delay from all spinning columns
+			if step < totalSteps-1 && maxDelay > 0 {
+				time.Sleep(maxDelay)
 			}
 		}
+	}()
 
-		return frame
-	}
-
-	for step := 0; step < totalSteps; step++ {
-		frame := makeFrame(step)
-		embed := g.buildEmbed(formatReels(frame), 0, 0, false, 0)
-		embeds := []*discordgo.MessageEmbed{embed}
-
-		if _, err := g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds}); err != nil {
-		}
-
-		// Calculate delays for each spinning column
-		maxDelay := time.Duration(0)
-		for c := 0; c < 3; c++ {
-			if !columnLocked[c] {
-				delay := g.calculateColumnDeceleration(c, step, totalSteps, lockSteps[c])
-				if delay > maxDelay {
-					maxDelay = delay
-				}
-
-				// Advance position if column is still spinning
-				if step < lockSteps[c]-1 {
-					// Normal advancement
-					positions[c]++
-				} else if step == lockSteps[c]-1 {
-					// Position to show final result on next frame
-					positions[c] = stripLen - 3
-				}
-			}
-		}
-
-		// Use the maximum delay from all spinning columns
-		if step < totalSteps-1 && maxDelay > 0 {
-			time.Sleep(maxDelay)
-		}
-	}
+	// Return immediately so game can continue processing results
+	// Animation runs in background and won't block game completion
 }
 
 // HandleSlotsInteraction processes "Spin Again" button
@@ -579,19 +637,29 @@ func HandleSlotsInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 	}
 	// Update message immediately to spinning state (component update) and reuse same message
 	spinning := utils.CreateBrandedEmbed("🎰 Slot Machine", "Spinning the reels...", 0x3498db)
-	if err := utils.UpdateComponentInteraction(s, i, spinning, []discordgo.MessageComponent{}); err != nil {
+	if err := utils.UpdateComponentInteractionWithTimeout(s, i, spinning, []discordgo.MessageComponent{}, 3*time.Second); err != nil {
 		return
 	}
-	game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, Rand: rand.New(rand.NewSource(time.Now().UnixNano())), MessageID: i.Message.ID, ChannelID: i.ChannelID, UsedOriginal: true}
-	game.BaseGame.CountWinLossMinRatio = 0.20
-	if err := game.ValidateBet(); err != nil {
-		utils.TryEphemeralFollowup(s, i, err.Error())
-		return
-	}
-	if utils.JackpotMgr != nil {
-		go func() { recover(); utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, adjusted) }()
-	}
-	go game.play()
+	// Start game asynchronously to avoid blocking the interaction
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Try to send error message if possible
+				utils.TryEphemeralFollowup(s, i, "An unexpected error occurred. Please try again.")
+			}
+		}()
+
+		game := &Game{BaseGame: utils.NewBaseGame(s, i, adjusted, "slots"), Session: s, Phase: phaseInitial, Rand: rand.New(rand.NewSource(time.Now().UnixNano())), MessageID: i.Message.ID, ChannelID: i.ChannelID, UsedOriginal: true}
+		game.BaseGame.CountWinLossMinRatio = 0.20
+		if err := game.ValidateBet(); err != nil {
+			utils.TryEphemeralFollowup(s, i, err.Error())
+			return
+		}
+		if utils.JackpotMgr != nil {
+			go func() { recover(); utils.JackpotMgr.ContributeToJackpot(utils.JackpotSlots, adjusted) }()
+		}
+		game.play()
+	}()
 	if note != "" {
 		s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{Content: note, Flags: discordgo.MessageFlagsEphemeral})
 	}
