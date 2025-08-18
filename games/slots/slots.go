@@ -490,107 +490,101 @@ func (g *Game) calculateColumnDeceleration(column, step, totalSteps, lockStep in
 func (g *Game) animateSpin(final [][]string) {
 	g.Phase = phaseSpinning
 
-	// Run animation asynchronously to avoid blocking the game completion
-	go func() {
-		defer func() { recover() }() // Prevent animation panics from affecting game state
+	// Enhanced animation parameters
+	totalSteps := 20
+	col1Lock := 8
+	col2Lock := 14
+	col3Lock := 18
+	stripLen := 30
 
-		// Enhanced animation parameters
-		totalSteps := 20
-		col1Lock := 8
-		col2Lock := 14
-		col3Lock := 18
-		stripLen := 30
+	// Generate realistic reel strips for each column
+	strips := make([][]string, 3)
+	for c := 0; c < 3; c++ {
+		finalColumn := []string{final[0][c], final[1][c], final[2][c]}
+		strips[c] = g.generateReelStrip(c, finalColumn, stripLen)
+	}
 
-		// Generate realistic reel strips for each column
-		strips := make([][]string, 3)
-		for c := 0; c < 3; c++ {
-			finalColumn := []string{final[0][c], final[1][c], final[2][c]}
-			strips[c] = g.generateReelStrip(c, finalColumn, stripLen)
+	// Track position for each column
+	positions := []int{0, 0, 0}
+	columnLocked := []bool{false, false, false}
+	lockSteps := []int{col1Lock, col2Lock, col3Lock}
+
+	makeFrame := func(step int) [][]string {
+		frame := make([][]string, 3)
+		for r := 0; r < 3; r++ {
+			frame[r] = make([]string, 3)
 		}
 
-		// Track position for each column
-		positions := []int{0, 0, 0}
-		columnLocked := []bool{false, false, false}
-		lockSteps := []int{col1Lock, col2Lock, col3Lock}
+		for c := 0; c < 3; c++ {
+			var colSyms []string
 
-		makeFrame := func(step int) [][]string {
-			frame := make([][]string, 3)
-			for r := 0; r < 3; r++ {
-				frame[r] = make([]string, 3)
-			}
-
-			for c := 0; c < 3; c++ {
-				var colSyms []string
-
-				if columnLocked[c] {
-					// Column is locked, show final result
+			if columnLocked[c] {
+				// Column is locked, show final result
+				colSyms = []string{final[0][c], final[1][c], final[2][c]}
+			} else {
+				// Column is still spinning
+				if step >= lockSteps[c] {
+					// Time to lock this column
+					columnLocked[c] = true
 					colSyms = []string{final[0][c], final[1][c], final[2][c]}
 				} else {
-					// Column is still spinning
-					if step >= lockSteps[c] {
-						// Time to lock this column
-						columnLocked[c] = true
-						colSyms = []string{final[0][c], final[1][c], final[2][c]}
-					} else {
-						// Show current position in the strip
-						pos := positions[c]
-						colSyms = []string{
-							strips[c][pos%stripLen],
-							strips[c][(pos+1)%stripLen],
-							strips[c][(pos+2)%stripLen],
-						}
-					}
-				}
-
-				for r := 0; r < 3; r++ {
-					frame[r][c] = colSyms[r]
-				}
-			}
-
-			return frame
-		}
-
-		// Animation loop with async message updates
-		for step := 0; step < totalSteps; step++ {
-			frame := makeFrame(step)
-			embed := g.buildEmbed(formatReels(frame), 0, 0, false, 0)
-			embeds := []*discordgo.MessageEmbed{embed}
-
-			// Update message asynchronously to avoid blocking animation timing
-			go func(embeds []*discordgo.MessageEmbed) {
-				defer func() { recover() }()
-				g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds})
-			}(embeds)
-
-			// Calculate delays for each spinning column
-			maxDelay := time.Duration(0)
-			for c := 0; c < 3; c++ {
-				if !columnLocked[c] {
-					delay := g.calculateColumnDeceleration(c, step, totalSteps, lockSteps[c])
-					if delay > maxDelay {
-						maxDelay = delay
-					}
-
-					// Advance position if column is still spinning
-					if step < lockSteps[c]-1 {
-						// Normal advancement
-						positions[c]++
-					} else if step == lockSteps[c]-1 {
-						// Position to show final result on next frame
-						positions[c] = stripLen - 3
+					// Show current position in the strip
+					pos := positions[c]
+					colSyms = []string{
+						strips[c][pos%stripLen],
+						strips[c][(pos+1)%stripLen],
+						strips[c][(pos+2)%stripLen],
 					}
 				}
 			}
 
-			// Use the maximum delay from all spinning columns
-			if step < totalSteps-1 && maxDelay > 0 {
-				time.Sleep(maxDelay)
+			for r := 0; r < 3; r++ {
+				frame[r][c] = colSyms[r]
 			}
 		}
-	}()
 
-	// Return immediately so game can continue processing results
-	// Animation runs in background and won't block game completion
+		return frame
+	}
+
+	// Animation loop - synchronous to block game completion until animation finishes
+	for step := 0; step < totalSteps; step++ {
+		frame := makeFrame(step)
+		embed := g.buildEmbed(formatReels(frame), 0, 0, false, 0)
+		embeds := []*discordgo.MessageEmbed{embed}
+
+		// Update message asynchronously to avoid blocking animation timing
+		go func(embeds []*discordgo.MessageEmbed) {
+			defer func() { recover() }()
+			g.Session.ChannelMessageEditComplex(&discordgo.MessageEdit{ID: g.MessageID, Channel: g.ChannelID, Embeds: &embeds})
+		}(embeds)
+
+		// Calculate delays for each spinning column
+		maxDelay := time.Duration(0)
+		for c := 0; c < 3; c++ {
+			if !columnLocked[c] {
+				delay := g.calculateColumnDeceleration(c, step, totalSteps, lockSteps[c])
+				if delay > maxDelay {
+					maxDelay = delay
+				}
+
+				// Advance position if column is still spinning
+				if step < lockSteps[c]-1 {
+					// Normal advancement
+					positions[c]++
+				} else if step == lockSteps[c]-1 {
+					// Position to show final result on next frame
+					positions[c] = stripLen - 3
+				}
+			}
+		}
+
+		// Use the maximum delay from all spinning columns
+		if step < totalSteps-1 && maxDelay > 0 {
+			time.Sleep(maxDelay)
+		}
+	}
+
+	// Animation completed - main game flow can now continue with results
 }
 
 // HandleSlotsInteraction processes "Spin Again" button
