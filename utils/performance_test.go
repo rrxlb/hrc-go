@@ -44,8 +44,8 @@ func BenchmarkCacheOperations(b *testing.B) {
 	defer CloseCache()
 
 	testUser := &User{
-		UserID: 12345,
-		Chips:  1000,
+		UserID:  12345,
+		Chips:   1000,
 		TotalXP: 5000,
 	}
 
@@ -61,7 +61,7 @@ func BenchmarkCacheOperations(b *testing.B) {
 		for i := 0; i < 1000; i++ {
 			Cache.Set(int64(i), testUser)
 		}
-		
+
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			Cache.Get(int64(i % 1000))
@@ -72,7 +72,7 @@ func BenchmarkCacheOperations(b *testing.B) {
 // BenchmarkFormatting tests number formatting performance
 func BenchmarkFormatting(b *testing.B) {
 	testNumbers := []int64{123, 1234, 12345, 123456, 1234567, 12345678}
-	
+
 	b.Run("FormatChips", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {

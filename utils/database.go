@@ -126,7 +126,7 @@ var (
 			}
 		},
 	}
-	
+
 	embedPool = sync.Pool{
 		New: func() interface{} {
 			return &discordgo.MessageEmbed{
@@ -134,13 +134,13 @@ var (
 			}
 		},
 	}
-	
+
 	componentPool = sync.Pool{
 		New: func() interface{} {
 			return make([]discordgo.MessageComponent, 0, 5)
 		},
 	}
-	
+
 	stringSlicePool = sync.Pool{
 		New: func() interface{} {
 			return make([]string, 0, 10)
@@ -231,17 +231,17 @@ func SetupDatabase() error {
 	}
 
 	// Optimize connection pool for Discord bot workload on Railway
-	config.MaxConns = 30                      // Increased for better concurrency
-	config.MinConns = 8                       // More ready connections for bursts
-	config.MaxConnLifetime = 45 * time.Minute // Balanced connection recycling
-	config.MaxConnIdleTime = 5 * time.Minute  // Faster idle cleanup
+	config.MaxConns = 30                        // Increased for better concurrency
+	config.MinConns = 8                         // More ready connections for bursts
+	config.MaxConnLifetime = 45 * time.Minute   // Balanced connection recycling
+	config.MaxConnIdleTime = 5 * time.Minute    // Faster idle cleanup
 	config.HealthCheckPeriod = 30 * time.Second // More frequent health checks
-	
+
 	// Additional performance optimizations
 	config.ConnConfig.RuntimeParams = map[string]string{
-		"application_name":     "hrc-discord-bot",
-		"timezone":            "UTC",
-		"statement_timeout":   "30s",
+		"application_name":                    "hrc-discord-bot",
+		"timezone":                            "UTC",
+		"statement_timeout":                   "30s",
 		"idle_in_transaction_session_timeout": "60s",
 	}
 
@@ -619,7 +619,7 @@ func GetMultipleUsers(userIDs []int64) (map[int64]*User, error) {
 	}
 
 	ctx := context.Background()
-	
+
 	// Build parameterized query for multiple users
 	query := `
 		SELECT user_id, chips, total_xp, current_xp, prestige, wins, losses, 

@@ -89,7 +89,7 @@ func InitializeAchievementManager() error {
 	if err := AchievementMgr.LoadAchievements(); err != nil {
 		return err
 	}
-	
+
 	// Refresh achievements to ensure database has latest reward values
 	return AchievementMgr.RefreshAchievementsFromDefaults()
 }
@@ -339,7 +339,7 @@ func (am *AchievementManager) RefreshAchievementsFromDefaults() error {
 
 	// Load default achievements into memory
 	am.loadDefaultAchievements()
-	
+
 	// Save them to database (will update existing ones due to ON CONFLICT DO UPDATE)
 	return am.saveDefaultAchievements()
 }

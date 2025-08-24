@@ -377,7 +377,7 @@ func registerSlashCommands(s *discordgo.Session) error {
 	}
 
 	log.Printf("✅ Successfully registered %d commands", len(registeredCommands))
-	
+
 	// Log what was actually registered
 	for _, cmd := range registeredCommands {
 		log.Printf("  ✓ %s: %s", cmd.Name, cmd.Description)
