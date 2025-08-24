@@ -16,6 +16,22 @@ import (
 var ActiveGames = make(map[string]*BlackjackGame)
 var gamesMutex sync.RWMutex
 
+// Circuit breaker for blackjack commands to prevent overload
+type BlackjackCircuitBreaker struct {
+	failures    int64
+	lastFailure time.Time
+	mutex       sync.RWMutex
+}
+
+var circuitBreaker = &BlackjackCircuitBreaker{}
+
+const (
+	// Circuit breaker configuration
+	CircuitBreakerFailureThreshold = 5                // Open circuit after 5 failures
+	CircuitBreakerResetDuration    = 30 * time.Second // Reset circuit after 30 seconds
+	CircuitBreakerMaxGames         = 100              // Maximum concurrent games
+)
+
 // Cleanup configuration for game state management
 const (
 	GameTimeoutDuration = 10 * time.Minute // Games timeout after 10 minutes of inactivity
@@ -55,6 +71,41 @@ func cleanupExpiredGames() {
 
 	if expiredCount > 0 {
 	}
+}
+
+// Circuit breaker methods
+func (cb *BlackjackCircuitBreaker) canExecute() bool {
+	cb.mutex.RLock()
+	defer cb.mutex.RUnlock()
+
+	// Check if circuit should reset
+	if time.Since(cb.lastFailure) > CircuitBreakerResetDuration {
+		return true
+	}
+
+	// Circuit is open if too many failures
+	return cb.failures < CircuitBreakerFailureThreshold
+}
+
+func (cb *BlackjackCircuitBreaker) recordFailure() {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+	cb.failures++
+	cb.lastFailure = time.Now()
+}
+
+func (cb *BlackjackCircuitBreaker) recordSuccess() {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+	if time.Since(cb.lastFailure) > CircuitBreakerResetDuration {
+		cb.failures = 0
+	}
+}
+
+func (cb *BlackjackCircuitBreaker) reset() {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+	cb.failures = 0
 }
 
 // GameState represents the current state of interaction handling
@@ -148,23 +199,10 @@ func (bg *BlackjackGame) StartGame() error {
 	embed := bg.createGameEmbed(false)
 	components := bg.View.GetComponents()
 
-	// Use simple, working response pattern without complex animations
-	var err error
-	if bg.State == StateDeferred {
-		// Interaction was deferred; use direct update with increased timeout for reliability
-		err = utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 5*time.Second)
-		if err == nil {
-			bg.State = StateActive
-		}
-	} else {
-		// No prior response; send initial response now (fallback case)
-		err = utils.SendInteractionResponseWithTimeout(bg.Session, bg.Interaction, embed, components, false, 5*time.Second)
-		if err == nil {
-			bg.State = StateActive
-		}
-	}
-
+	// SIMPLIFIED: Direct response pattern - interaction is always deferred at this point
+	err := utils.UpdateInteractionResponseWithTimeout(bg.Session, bg.OriginalInteraction, embed, components, 3*time.Second)
 	if err == nil {
+		bg.State = StateActive
 		// Capture original message ID for fallback edits later (non-blocking async)
 		go bg.captureMessageIDAsync()
 	}
@@ -877,12 +915,30 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 	// Add panic recovery to prevent silent failures
 	defer func() {
 		if r := recover(); r != nil {
+			circuitBreaker.recordFailure()
 			respondWithError(s, i, "An unexpected error occurred. Please try again.")
 		}
 	}()
 
+	// CIRCUIT BREAKER: Check if system is overloaded
+	if !circuitBreaker.canExecute() {
+		respondWithError(s, i, "Blackjack system is temporarily overloaded. Please try again in a moment.")
+		return
+	}
+
+	// Check game count limit to prevent resource exhaustion
+	gamesMutex.RLock()
+	gameCount := len(ActiveGames)
+	gamesMutex.RUnlock()
+	if gameCount >= CircuitBreakerMaxGames {
+		circuitBreaker.recordFailure()
+		respondWithError(s, i, "Maximum number of concurrent games reached. Please try again later.")
+		return
+	}
+
 	// Fast validation checks before any Discord API calls
 	if i == nil || i.Member == nil || i.Member.User == nil {
+		circuitBreaker.recordFailure()
 		respondWithError(s, i, "Invalid user data")
 		return
 	}
@@ -890,6 +946,7 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 	// Parse bet amount immediately to fail fast on invalid input
 	options := i.ApplicationCommandData().Options
 	if len(options) == 0 {
+		circuitBreaker.recordFailure()
 		respondWithError(s, i, "No bet amount provided")
 		return
 	}
@@ -897,87 +954,92 @@ func HandleBlackjackCommand(s *discordgo.Session, i *discordgo.InteractionCreate
 	betStr := options[0].StringValue()
 	userID, err := parseUserID(i.Member.User.ID)
 	if err != nil {
+		circuitBreaker.recordFailure()
 		respondWithError(s, i, "Failed to parse user ID")
 		return
 	}
 
-	// Check for existing game immediately to prevent race conditions
-	gamesMutex.RLock()
+	// CRITICAL FIX: Atomic check-and-set to prevent race conditions
+	gamesMutex.Lock()
+	// Check for existing game while holding the lock
 	for _, existingGame := range ActiveGames {
 		if existingGame.UserID == userID {
-			gamesMutex.RUnlock()
+			gamesMutex.Unlock()
 			respondWithError(s, i, "You already have an active blackjack game. Please finish it first.")
 			return
 		}
 	}
-	gamesMutex.RUnlock()
 
-	// Defer only after validation passes
+	// OPTIMIZATION: Get user data and validate bet BEFORE deferring to fail fast
+	user, err := utils.GetCachedUser(userID)
+	if err != nil {
+		gamesMutex.Unlock()
+		circuitBreaker.recordFailure()
+		respondWithError(s, i, "Failed to get user data")
+		return
+	}
+
+	// Parse and validate bet
+	bet, err := utils.ParseBet(betStr, user.Chips)
+	if err != nil {
+		gamesMutex.Unlock()
+		respondWithError(s, i, "Invalid bet amount: "+err.Error())
+		return
+	}
+
+	if bet <= 0 {
+		gamesMutex.Unlock()
+		respondWithError(s, i, "Bet amount must be greater than 0")
+		return
+	}
+
+	if user.Chips < bet {
+		gamesMutex.Unlock()
+		embed := utils.InsufficientChipsEmbed(bet, user.Chips, "blackjack")
+		utils.SendInteractionResponse(s, i, embed, nil, false)
+		return
+	}
+
+	// Create game instance while still holding the lock
+	game := NewBlackjackGame(s, i, bet)
+	if game == nil {
+		gamesMutex.Unlock()
+		circuitBreaker.recordFailure()
+		respondWithError(s, i, "Failed to create game instance")
+		return
+	}
+
+	game.UserData = user
+	// Store game immediately to prevent race condition
+	ActiveGames[game.GameID] = game
+	gamesMutex.Unlock()
+
+	// Now defer the interaction - all slow operations are done
 	if err := utils.DeferInteractionResponse(s, i, false); err != nil {
+		// Clean up game if defer fails
+		gamesMutex.Lock()
+		delete(ActiveGames, game.GameID)
+		gamesMutex.Unlock()
+		circuitBreaker.recordFailure()
 		respondWithError(s, i, "Failed to acknowledge command")
 		return
 	}
 
-	// Execute game creation with proper error handling
-	go func() {
-		// Add panic recovery for the goroutine
-		defer func() {
-			if r := recover(); r != nil {
-				respondWithDeferredError(s, i, "An unexpected error occurred. Please try again.")
-			}
-		}()
+	game.State = StateDeferred
 
-		// Get user data
-		user, err := utils.GetCachedUser(userID)
-		if err != nil {
-			respondWithDeferredError(s, i, "Failed to get user data")
-			return
-		}
-
-		// Parse and validate bet
-		bet, err := utils.ParseBet(betStr, user.Chips)
-		if err != nil {
-			respondWithDeferredError(s, i, "Invalid bet amount: "+err.Error())
-			return
-		}
-
-		if bet <= 0 {
-			respondWithDeferredError(s, i, "Bet amount must be greater than 0")
-			return
-		}
-
-		if user.Chips < bet {
-			embed := utils.InsufficientChipsEmbed(bet, user.Chips, "blackjack")
-			utils.UpdateInteractionResponse(s, i, embed, nil)
-			return
-		}
-
-		// Create and start game
-		game := NewBlackjackGame(s, i, bet)
-		if game == nil {
-			respondWithDeferredError(s, i, "Failed to create game instance")
-			return
-		}
-
-		game.UserData = user
-		game.State = StateDeferred
-
-		// Store game in active games
+	// Start game immediately - no goroutine needed since slow work is done
+	if err := game.StartGame(); err != nil {
+		// Clean up failed game
 		gamesMutex.Lock()
-		ActiveGames[game.GameID] = game
+		delete(ActiveGames, game.GameID)
 		gamesMutex.Unlock()
+		circuitBreaker.recordFailure()
+		respondWithDeferredError(s, i, "Failed to start game: "+err.Error())
+		return
+	}
 
-		// Start game
-		if err := game.StartGame(); err != nil {
-			respondWithDeferredError(s, i, "Failed to start game: "+err.Error())
-
-			// Clean up failed game
-			gamesMutex.Lock()
-			delete(ActiveGames, game.GameID)
-			gamesMutex.Unlock()
-			return
-		}
-	}()
+	// SUCCESS: Record successful command execution
+	circuitBreaker.recordSuccess()
 }
 
 // HandleBlackjackInteraction handles component interactions for blackjack games
@@ -1050,6 +1112,7 @@ func (bg *BlackjackGame) isWebhookExpired(err error) bool {
 func (bg *BlackjackGame) fallbackEdit(embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
 	// Check circuit breaker first - fast fail if too many recent failures
 	if !utils.WebhookCircuitBreaker.CanExecute() {
+		utils.BotLogf("BLACKJACK_FALLBACK", "Circuit breaker open, skipping fallback edit for user %d", bg.UserID)
 		return fmt.Errorf("fallback edit circuit breaker open")
 	}
 
@@ -1063,6 +1126,7 @@ func (bg *BlackjackGame) fallbackEdit(embed *discordgo.MessageEmbed, components 
 
 	if bg.ChannelID == "" || bg.MessageID == "" {
 		utils.WebhookCircuitBreaker.RecordFailure()
+		utils.BotLogf("BLACKJACK_FALLBACK", "Missing message/channel ID for user %d, cannot perform fallback edit", bg.UserID)
 		return fmt.Errorf("missing message/channel id for fallback edit")
 	}
 
@@ -1086,13 +1150,16 @@ func (bg *BlackjackGame) fallbackEdit(embed *discordgo.MessageEmbed, components 
 	case res := <-resultChan:
 		if res.err != nil {
 			utils.WebhookCircuitBreaker.RecordFailure()
+			utils.BotLogf("BLACKJACK_FALLBACK", "Fallback edit failed for user %d: %v", bg.UserID, res.err)
 			return res.err
 		}
 		utils.WebhookCircuitBreaker.RecordSuccess()
+		utils.BotLogf("BLACKJACK_FALLBACK", "Fallback edit successful for user %d", bg.UserID)
 		return nil
-	case <-time.After(3 * time.Second):
+	case <-time.After(2 * time.Second):
 		utils.WebhookCircuitBreaker.RecordFailure()
-		return fmt.Errorf("fallback edit timeout after 3s")
+		utils.BotLogf("BLACKJACK_FALLBACK", "Fallback edit timeout for user %d", bg.UserID)
+		return fmt.Errorf("fallback edit timeout after 2s")
 	}
 }
 
@@ -1104,24 +1171,40 @@ func parseUserID(discordID string) (int64, error) {
 }
 
 func respondWithError(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
+	// Log error for debugging with user context
+	userID := "unknown"
+	if i != nil && i.Member != nil && i.Member.User != nil {
+		userID = i.Member.User.ID
+	}
+	utils.BotLogf("BLACKJACK_ERROR", "User %s error: %s", userID, message)
+
 	embed := utils.CreateBrandedEmbed(
 		"❌ Error",
 		message,
 		0xFF0000, // Red
 	)
 
-	utils.SendInteractionResponse(s, i, embed, nil, true)
+	// Use timeout to ensure response doesn't hang
+	utils.SendInteractionResponseWithTimeout(s, i, embed, nil, true, 2*time.Second)
 }
 
 // respondWithDeferredError sends an error response for already-deferred interactions
 func respondWithDeferredError(s *discordgo.Session, i *discordgo.InteractionCreate, message string) {
+	// Log error for debugging with user context
+	userID := "unknown"
+	if i != nil && i.Member != nil && i.Member.User != nil {
+		userID = i.Member.User.ID
+	}
+	utils.BotLogf("BLACKJACK_ERROR", "User %s deferred error: %s", userID, message)
+
 	embed := utils.CreateBrandedEmbed(
 		"❌ Error",
 		message,
 		0xFF0000, // Red
 	)
 
-	utils.UpdateInteractionResponse(s, i, embed, nil)
+	// Use timeout to ensure response doesn't hang
+	utils.UpdateInteractionResponseWithTimeout(s, i, embed, nil, 2*time.Second)
 }
 
 // RegisterBlackjackCommands returns the slash command definition for blackjack
